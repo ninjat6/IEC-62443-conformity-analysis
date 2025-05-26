@@ -5,7 +5,7 @@ import chardet
 import pythoncom
 import win32com.client as win32
 from pathlib import Path
-from .logger import logger
+from conformity_analysis_module.utils.logger import logger # Corrected logger import
 # Assuming path_utils.py is in the project root and accessible in PYTHONPATH
 from path_utils import get_cache_dir
 

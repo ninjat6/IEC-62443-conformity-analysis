@@ -10,7 +10,7 @@ from widgets.draggable_label import DraggableLabel
 from utils.file_processor import FileProcessor  # 引入檔案處理工具
 # Assuming path_utils.py is in the project root and accessible in PYTHONPATH
 from path_utils import get_reports_dir
-from utils.logger import logger # Assuming logger is set up in utils
+from conformity_analysis_module.utils.logger import logger # Corrected logger import
 
 class FloatingDialog(QDialog):
     """

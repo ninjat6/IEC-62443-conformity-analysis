@@ -1,13 +1,10 @@
 # conformity_analysis_module/main.py
 import sys
-import os
+# import os # Removed as it's no longer used
 from PyQt6.QtWidgets import QApplication
 from conformity_analysis_module.gui.main_window import ConformityAnalysisWindow
 
-# 將專案根目錄加入 sys.path
-ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+# The sys.path modification block has been removed.
 
 class ConformityAnalysis:
     """
