@@ -1,22 +1,17 @@
-import os
-import sys
 import re
+from pathlib import Path # Added
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QColor
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QGraphicsDropShadowEffect
 
 from file_search_module.utils.common import format_modified_date
+# Assuming path_utils.py is at project root and accessible in PYTHONPATH
+from path_utils import get_bundled_resource_path 
 
-def resource_path(relative_path):
-    """取得資源的絕對路徑，支援開發與打包環境"""
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+# Local resource_path function removed
 
 class ResultCard(QFrame):
-    cardDoubleClicked = pyqtSignal(str, str)
+    cardDoubleClicked = pyqtSignal(str, str) # file_path, keyword
     
     def __init__(self, file_path, raw_line, keyword, parent=None):
         super().__init__(parent)
@@ -45,30 +40,41 @@ class ResultCard(QFrame):
         main_layout.setContentsMargins(15, 10, 15, 10)
         main_layout.setSpacing(6)
         
-        filename = os.path.basename(self.file_path)
+        file_path_obj = Path(self.file_path)
+        filename = file_path_obj.name # Replaces os.path.basename
+        
         try:
-            modified_time = os.path.getmtime(self.file_path)
+            # Get modification time using pathlib
+            modified_time = file_path_obj.stat().st_mtime 
             date_str = format_modified_date(modified_time)
-        except Exception:
+        except Exception: # Catch potential errors like FileNotFoundError if path is invalid
             date_str = ""
         
         top_layout = QHBoxLayout()
         top_layout.setSpacing(8)
         
-        ext = filename.split(".")[-1].lower() if "." in filename else ""
+        # Get extension using pathlib
+        ext = file_path_obj.suffix.lower().lstrip('.') if file_path_obj.suffix else ""
+        
+        # Base path for icons relative to project root
+        icon_base_path_str = "file_search_module/ui/icons/"
+        
         ext_icon_map = {
-            'pdf': resource_path('icons/pdf_icon.png'),
-            'txt': resource_path('icons/txt_icon.png'),
-            'docx': resource_path('icons/docx_icon.png'),
-            'xlsx': resource_path('icons/xlsx_icon.png'),
-            'html': resource_path('icons/html_icon.png')
+            'pdf': get_bundled_resource_path(f"{icon_base_path_str}pdf_icon.png"),
+            'txt': get_bundled_resource_path(f"{icon_base_path_str}txt_icon.png"),
+            'docx': get_bundled_resource_path(f"{icon_base_path_str}docx_icon.png"),
+            'xlsx': get_bundled_resource_path(f"{icon_base_path_str}xlsx_icon.png"),
+            'html': get_bundled_resource_path(f"{icon_base_path_str}html_icon.png")
         }
-        icon_path = ext_icon_map.get(ext, resource_path('ui/icons/file_icon.png'))
+        # Default icon path also needs to be relative to project root
+        default_icon_path = get_bundled_resource_path(f"{icon_base_path_str}file_icon.png")
+        icon_path_obj = ext_icon_map.get(ext, default_icon_path)
         
         icon_label = QLabel()
-        icon_label.setPixmap(QIcon(icon_path).pixmap(30, 30))
+        # QIcon can handle Path objects, but str() is safer if issues arise
+        icon_label.setPixmap(QIcon(str(icon_path_obj)).pixmap(30, 30)) 
         
-        title_label = QLabel(filename)
+        title_label = QLabel(filename) # filename is already a string from Path.name
         font_title = QFont()
         font_title.setBold(True)
         font_title.setPointSize(14)

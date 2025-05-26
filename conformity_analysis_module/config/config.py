@@ -1,28 +1,27 @@
-# 在 config.py 中添加此函數
-import os
-import sys
+# conformity_analysis_module/config/config.py
+from pathlib import Path
+# Assuming path_utils.py is in the project root and accessible in PYTHONPATH
+from path_utils import get_log_dir, get_bundled_resource_path, get_cache_dir, get_reports_dir
 
-def resource_path(relative_path):
-    """獲取資源的絕對路徑，適用於開發環境和 PyInstaller 打包後的環境"""
-    if getattr(sys, 'frozen', False):
-        # 如果是在打包的應用程式中運行
-        base_path = sys._MEIPASS
-    else:
-        # 如果是在開發環境中運行
-        base_path = os.path.abspath(os.path.dirname(__file__))
-    return os.path.join(base_path, relative_path)
+# The old resource_path function is removed.
 
 class Config:
-    ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    LOG_DIR = os.path.join(ROOT_DIR, "log")
+    # ROOT_DIR points to the root of the 'conformity_analysis_module'.
+    # This might still be useful for module-specific relative paths not covered by path_utils.
+    ROOT_DIR = Path(__file__).resolve().parent.parent 
     
-    # 使用 resource_path 處理需要打包的資源路徑
-    REQUIREMENTS_FILE = resource_path(os.path.join("..", "requirements_cn.json"))
-    ANALYSIS_OUTPUT = os.path.join(ROOT_DIR, "analysis_results.json")
-    WORKSHEET_FILE = resource_path(os.path.join("..", "template", "IEC62443_2_4d_2024-worksheet.xlsx"))
-    DOCX_CACHE_FILE = os.path.join(ROOT_DIR, "docx_contents.json")
+    LOG_DIR = get_log_dir()
+    
+    # Bundled resources - paths are relative to project root or bundled_assets for get_bundled_resource_path
+    REQUIREMENTS_FILE = get_bundled_resource_path("conformity_analysis_module/requirements_cn.json")
+    WORKSHEET_FILE = get_bundled_resource_path("conformity_analysis_module/template/IEC62443_2_4d_2024-worksheet.xlsx")
+    
+    # Output/Cache directories
+    ANALYSIS_OUTPUT = get_reports_dir() / "analysis_results.json"
+    DOCX_CACHE_FILE = get_cache_dir() / "docx_contents.json"
 
     @staticmethod
-    def ensure_dir(directory):
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+    def ensure_dir(directory: Path):
+        # This method is now less critical if path_utils functions ensure dirs,
+        # but can be kept for other uses or as a safeguard.
+        directory.mkdir(parents=True, exist_ok=True)

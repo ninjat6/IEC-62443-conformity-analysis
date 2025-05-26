@@ -1,7 +1,6 @@
 # dialogs/floating_dialog.py
-
-import os
 import json
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QScrollArea, QWidget, QGridLayout,
     QLabel, QPushButton, QMessageBox
@@ -9,6 +8,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from widgets.draggable_label import DraggableLabel
 from utils.file_processor import FileProcessor  # 引入檔案處理工具
+# Assuming path_utils.py is in the project root and accessible in PYTHONPATH
+from path_utils import get_reports_dir
+from utils.logger import logger # Assuming logger is set up in utils
 
 class FloatingDialog(QDialog):
     """
@@ -19,12 +21,31 @@ class FloatingDialog(QDialog):
     - 同時支援呼叫 FileProcessor.process_file 處理檔案產生 JSON，
       並動態更新介面。
     """
-    def __init__(self, json_data=None, parent=None, multi_level=False):
+    def __init__(self, json_data=None, parent=None, multi_level=False, 
+                 word_root_dir_str: str = None, default_output_dir_str: str = None):
         super().__init__(parent)
         self.json_data = json_data
         self.multi_level = multi_level
-        self.current_folder = None
+        self.current_stage_name = None # Stores the name of the current stage folder
         self.in_file_list_mode = False
+
+        # Initialize word_root path
+        if word_root_dir_str:
+            self.word_root = Path(word_root_dir_str).resolve()
+            logger.info(f"FloatingDialog: Using provided Word source directory: {self.word_root}")
+        else:
+            self.word_root = Path.home() / "Documents" / "IEC62443_Word_Sources"
+            logger.info(f"FloatingDialog: Word source directory not provided. Defaulting to: {self.word_root}. This should ideally be user-configurable.")
+        self.word_root.mkdir(parents=True, exist_ok=True)
+
+        # Initialize output_dir path
+        if default_output_dir_str:
+            self.output_dir = Path(default_output_dir_str).resolve()
+            logger.info(f"FloatingDialog: Using provided output directory: {self.output_dir}")
+        else:
+            self.output_dir = get_reports_dir() / "Processed_JSONs"
+            logger.info(f"FloatingDialog: Output directory not provided. Defaulting to: {self.output_dir}")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowTitle("Draggable JSON Elements (Floating)")
@@ -43,7 +64,6 @@ class FloatingDialog(QDialog):
 
         self.labels = []
 
-        # 根據模式決定初始介面
         if self.multi_level and self.json_data is None:
             self.init_multi_level_ui()
         else:
@@ -53,92 +73,119 @@ class FloatingDialog(QDialog):
 
     def init_multi_level_ui(self):
         """
-        初始化多階層瀏覽介面：顯示指定 WORD 根目錄下所有子資料夾按鈕
+        初始化多階層瀏覽介面：顯示 WORD 根目錄下所有子資料夾按鈕
         """
         self.clear_grid_layout(self.grid_layout)
         self.labels = []
-        self.current_folder = None
+        self.current_stage_name = None
         self.in_file_list_mode = False
 
-        # 設定 WORD 檔根目錄（此處可依需求調整或參數化）
-        self.word_root = r"C:\Users\user\Desktop\VScode\IEC 62443 2-4 1223\WORD檔"
-        if not os.path.isdir(self.word_root):
-            label = QLabel(f"目錄不存在：{self.word_root}")
+        if not self.word_root.is_dir():
+            msg = f"Word source directory not found or is not a directory: {self.word_root}"
+            logger.error(msg)
+            label = QLabel(msg)
             self.grid_layout.addWidget(label, 0, 0)
             return
 
-        subfolders = [entry.name for entry in os.scandir(self.word_root) if entry.is_dir()]
+        subfolders = []
+        try:
+            for entry in self.word_root.iterdir():
+                if entry.is_dir():
+                    subfolders.append(entry.name)
+        except Exception as e:
+            logger.error(f"Error scanning word_root directory {self.word_root}: {e}")
+            QMessageBox.critical(self, "Error", f"Could not read Word source directory: {e}")
+            return
+            
         subfolders.sort()
 
         if not subfolders:
-            label = QLabel("未找到任何階層資料夾。")
+            label = QLabel(f"未找到任何階層資料夾於: {self.word_root}")
             self.grid_layout.addWidget(label, 0, 0)
             return
 
-        for idx, folder in enumerate(subfolders):
-            btn = QPushButton(folder)
-            # 避免 lambda 閉包問題，使用預設參數
-            btn.clicked.connect(lambda _, f=folder: self.show_files_in_stage(f))
+        for idx, folder_name_str in enumerate(subfolders):
+            btn = QPushButton(folder_name_str)
+            btn.clicked.connect(lambda _, f=folder_name_str: self.show_files_in_stage(f))
             self.grid_layout.addWidget(btn, idx // 3, idx % 3)
 
-    def show_files_in_stage(self, folder_name):
+    def show_files_in_stage(self, folder_name_str: str): # folder_name_str is just the name, not full path
         """
         顯示指定階層資料夾中的檔案（支援 .doc、.docx、.xlsx）
         """
         self.clear_grid_layout(self.grid_layout)
         self.labels = []
         self.in_file_list_mode = True
-        self.current_folder = folder_name
+        self.current_stage_name = folder_name_str # Store the name of the stage
 
-        stage_path = os.path.join(self.word_root, folder_name)
-        if not os.path.isdir(stage_path):
-            label = QLabel(f"找不到資料夾：{stage_path}")
+        stage_path_obj = self.word_root / folder_name_str
+        if not stage_path_obj.is_dir():
+            msg = f"找不到資料夾：{stage_path_obj}"
+            logger.error(msg)
+            label = QLabel(msg)
             self.grid_layout.addWidget(label, 0, 0)
             return
 
         files = []
-        for entry in os.scandir(stage_path):
-            if entry.is_file():
-                ext = os.path.splitext(entry.name)[1].lower()
-                if ext in ['.doc', '.docx', '.xlsx']:
-                    files.append(entry.name)
+        try:
+            for entry in stage_path_obj.iterdir():
+                if entry.is_file():
+                    # Suffix includes the dot, e.g., ".docx"
+                    ext = entry.suffix.lower()
+                    if ext in ['.doc', '.docx', '.xlsx']:
+                        files.append(entry.name) # Store only the filename string
+        except Exception as e:
+            logger.error(f"Error scanning stage directory {stage_path_obj}: {e}")
+            QMessageBox.critical(self, "Error", f"Could not read stage directory: {e}")
+            return
+            
         files.sort()
 
         if not files:
-            label = QLabel(f"{folder_name} 資料夾內沒有可處理的檔案。")
+            label = QLabel(f"{folder_name_str} 資料夾內沒有可處理的檔案。")
             self.grid_layout.addWidget(label, 0, 0)
             return
 
-        # 返回按鈕：回到階層清單
         back_btn = QPushButton("← Back (Stages)")
         back_btn.clicked.connect(self.init_multi_level_ui)
         self.grid_layout.addWidget(back_btn, 0, 0)
 
         row_start = 1
-        for i, fname in enumerate(files):
-            btn = QPushButton(fname)
-            btn.clicked.connect(lambda _, fn=fname, sp=stage_path: self.run_file_processor(sp, fn))
+        for i, fname_str in enumerate(files):
+            btn = QPushButton(fname_str)
+            # Pass stage_path_obj (Path object) and fname_str (string)
+            btn.clicked.connect(lambda _, fn=fname_str, sp=stage_path_obj: self.run_file_processor(sp, fn))
             self.grid_layout.addWidget(btn, (i + row_start) // 3, (i + row_start) % 3)
 
-    def run_file_processor(self, folder_path, filename):
+    def run_file_processor(self, current_stage_path_obj: Path, filename_str: str):
         """
         呼叫 FileProcessor.process_file 處理檔案，
         產生中英文 JSON，並以英文 JSON 更新介面
         """
-        input_path = os.path.join(folder_path, filename)
-        output_dir = r"C:\Users\user\Desktop\VScode\IEC 62443 2-4 beta\resources\output_json"
+        input_path_obj = current_stage_path_obj / filename_str
+        
         try:
-            # 呼叫 utils/file_processor.py 中的 process_file 方法
-            result = FileProcessor.process_file(input_path, output_dir)
-            english_json_path = result.get("english_json")
-            if not english_json_path or not os.path.exists(english_json_path):
-                QMessageBox.warning(self, "Error", f"找不到英文 JSON：\n{english_json_path}")
+            logger.info(f"Processing file: {input_path_obj} with output to {self.output_dir}")
+            # FileProcessor.process_file will be refactored later.
+            # For now, assume it might still expect string paths.
+            result = FileProcessor.process_file(str(input_path_obj), str(self.output_dir))
+            
+            english_json_path_str = result.get("english_json")
+            if not english_json_path_str:
+                QMessageBox.warning(self, "Error", "英文 JSON 路徑未返回。")
                 return
-            with open(english_json_path, "r", encoding="utf-8") as f:
+
+            english_json_path_obj = Path(english_json_path_str)
+            if not english_json_path_obj.exists():
+                QMessageBox.warning(self, "Error", f"找不到英文 JSON：\n{english_json_path_str}")
+                return
+            
+            with open(english_json_path_obj, "r", encoding="utf-8") as f: # open() supports Path
                 new_json_data = json.load(f)
             self.display_json_data(new_json_data)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"處理檔案時發生錯誤：\n{str(e)}")
+            logger.error(f"Error processing file {input_path_obj}: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"處理檔案 '{filename_str}' 時發生錯誤：\n{str(e)}")
 
     def display_json_data(self, json_data):
         """

@@ -1,9 +1,11 @@
 # conformity_analysis_module/core/keyword_analyzer.py
-import os
 import json
 import re
-from conformity_analysis_module.config import Config
+from pathlib import Path
+# Assuming path_utils.py is in the project root and accessible in PYTHONPATH
+from path_utils import get_bundled_resource_path
 from conformity_analysis_module.utils.logger import logger
+# Config import removed as Config.ROOT_DIR is no longer used for default path
 
 class KeywordAnalyzer:
     """
@@ -11,11 +13,13 @@ class KeywordAnalyzer:
     """
     
     def __init__(self, keywords_file=None):
-        # 設定預設關鍵詞檔案路徑
+        # 設定關鍵詞檔案路徑
         if keywords_file is None:
-            self.keywords_file = os.path.join(Config.ROOT_DIR, 'data', 'keywords.json')
+            # Default path using get_bundled_resource_path
+            self.keywords_file = get_bundled_resource_path("conformity_analysis_module/data/keywords.json")
         else:
-            self.keywords_file = keywords_file
+            # If keywords_file is provided, assume it's an absolute path (string or Path object)
+            self.keywords_file = Path(keywords_file)
         
         # 載入關鍵詞和同義詞
         self._load_keywords()
@@ -23,7 +27,7 @@ class KeywordAnalyzer:
     def _load_keywords(self):
         """載入關鍵詞和同義詞定義"""
         try:
-            if os.path.exists(self.keywords_file):
+            if self.keywords_file.exists():
                 with open(self.keywords_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
@@ -151,9 +155,9 @@ class KeywordAnalyzer:
                 print(f"找到引用: {ref}, 提取編號: {ref_code}")
 
                 # 尋找匹配的源文件
-                for source_file in all_source_files:
-                    file_name = os.path.basename(source_file)
-                    file_name_without_ext = os.path.splitext(file_name)[0]
+                for source_file in all_source_files: # source_file is a string path
+                    file_name = Path(source_file).name
+                    file_name_without_ext = Path(file_name).stem # Use Path(file_name) as file_name is now just the name string
                     
                     # 從文件名中提取基本編號
                     file_match = re.search(r'([A-Z]+-\d+-\d+)[A-Za-z]?', file_name_without_ext)

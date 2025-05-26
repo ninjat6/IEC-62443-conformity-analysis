@@ -1,143 +1,165 @@
-import os
 import re
 import chardet
-import docx
-import openpyxl
-from PyPDF2 import PdfReader
+import docx # type: ignore
+import openpyxl # type: ignore
+from PyPDF2 import PdfReader # type: ignore
 from PyQt6.QtCore import QObject, pyqtSignal
+from pathlib import Path
+# Assuming a logger might be used, e.g., from file_search_module.utils.logger import logger
+# For now, using print for critical errors or relying on error_occurred signal.
 
 class SearchWorker(QObject):
     progress_update = pyqtSignal(int)
     search_finished = pyqtSignal(str)
     error_occurred = pyqtSignal(str, str)
-    file_matches_found = pyqtSignal(str, list)  # (檔案路徑, [符合的行])
+    file_matches_found = pyqtSignal(str, list)  # (file_path_str, [matching_lines])
     
-    def __init__(self, folder, keyword):
+    def __init__(self, folder_path_obj: Path, keyword: str): # Expects Path object
         super().__init__()
-        self.folder = folder
+        self.folder_path_obj = folder_path_obj.resolve() # Ensure it's absolute
         self.keyword = keyword
         self.cancel_search_flag = False
         self.total_files = 0
         self.current_progress = 0
     
     def start_search(self):
-        self.total_files = self.count_target_files(self.folder)
+        try:
+            self.total_files = self._count_target_files(self.folder_path_obj)
+        except Exception as e:
+            self.error_occurred.emit("錯誤", f"計算檔案總數時發生錯誤: {e}")
+            self.search_finished.emit("搜尋錯誤！")
+            return
+
         if self.total_files == 0:
             self.search_finished.emit("找不到可搜尋的檔案！")
             return
         
-        for root, _, files in os.walk(self.folder):
+        self.current_progress = 0 # Reset progress
+        
+        for item_path in self.folder_path_obj.rglob('*'):
             if self.cancel_search_flag:
                 self.search_finished.emit("搜尋已取消！")
                 return
             
-            for file in files:
-                if self.cancel_search_flag:
-                    self.search_finished.emit("搜尋已取消！")
-                    return
-                
-                file_path = os.path.join(root, file)
-                ext = file.lower().rsplit('.', 1)[-1]
+            if item_path.is_file():
+                ext = item_path.suffix.lower().lstrip('.')
                 
                 try:
                     if ext == "txt":
-                        self.process_text_file(file_path, self.keyword)
+                        self._process_text_file(item_path, self.keyword)
                     elif ext == "pdf":
-                        self.process_pdf_file(file_path, self.keyword)
+                        self._process_pdf_file(item_path, self.keyword)
                     elif ext == "docx":
-                        self.process_docx_file(file_path, self.keyword)
+                        self._process_docx_file(item_path, self.keyword)
                     elif ext == "xlsx":
-                        self.process_xlsx_file(file_path, self.keyword)
+                        self._process_xlsx_file(item_path, self.keyword)
                     elif ext in ("html", "htm"):
-                        self.process_text_file(file_path, self.keyword)
+                        # Treat HTML/HTM as text files for keyword search
+                        self._process_text_file(item_path, self.keyword)
+                    # else:
+                        # If not a target extension, we just increment progress for it if counted,
+                        # or simply skip if not counted. Current logic counts only specific extensions.
+                        # If we only want progress for matched extensions, this increment needs to be conditional.
+                        # For simplicity, assuming all files are iterated for progress if counted in _count_target_files
+                        # or that _count_target_files only counts relevant files.
+
                 except Exception as e:
-                    self.error_occurred.emit("錯誤", f"處理檔案 {file_path} 時發生問題: {e}")
+                    # Using str(item_path) for error messages
+                    self.error_occurred.emit("處理錯誤", f"處理檔案 {str(item_path)} 時發生問題: {e}")
                 
-                self.current_progress += 1
-                self.progress_update.emit(self.current_progress)
+                # Increment progress for every file processed that was part of the count
+                if ext in ("txt", "pdf", "docx", "xlsx", "html", "htm"):
+                    self.current_progress += 1
+                    self.progress_update.emit(self.current_progress)
         
         self.search_finished.emit("搜尋完成！")
     
     def cancel_search(self):
         self.cancel_search_flag = True
     
-    def count_target_files(self, folder):
+    def _count_target_files(self, folder_obj: Path) -> int: # folder_obj is Path
         count = 0
-        for root, _, files in os.walk(folder):
-            for file in files:
-                if file.lower().endswith((".txt", ".pdf", ".docx", ".xlsx", ".html", ".htm")):
+        for item_path in folder_obj.rglob('*'):
+            if item_path.is_file():
+                # Suffix includes the dot, e.g., ".txt"
+                if item_path.suffix.lower().lstrip('.') in ("txt", "pdf", "docx", "xlsx", "html", "htm"):
                     count += 1
         return count
     
-    def process_text_file(self, file_path, keyword):
+    def _process_text_file(self, file_path_obj: Path, keyword: str):
         try:
-            with open(file_path, "rb") as f:
+            with open(file_path_obj, "rb") as f: # open() handles Path objects
                 raw_data = f.read()
-            result = chardet.detect(raw_data)
-            detected_encoding = result["encoding"] or "utf-8"
-            text = raw_data.decode(detected_encoding, errors="replace")
+            # Use chardet result, default to utf-8 if None or low confidence
+            detected = chardet.detect(raw_data)
+            detected_encoding = detected.get("encoding", "utf-8") if detected and detected['confidence'] and detected['confidence'] > 0.5 else "utf-8"
+            if detected_encoding is None: detected_encoding = "utf-8" # Fallback
+
+            text = raw_data.decode(detected_encoding, errors="replace") # Use 'replace' for robustness
         except Exception as e:
-            self.error_occurred.emit("錯誤", f"無法讀取文字檔 {file_path}: {e}")
+            self.error_occurred.emit("讀取錯誤", f"無法讀取文字檔 {str(file_path_obj)}: {e}")
             return
         
         lines = text.splitlines()
         matches = []
-        for line in lines:
-            if re.search(re.escape(keyword), line, re.IGNORECASE):
-                matches.append(line.strip())
+        for line_num, line_content in enumerate(lines): # line_num for future use if needed
+            if re.search(re.escape(keyword), line_content, re.IGNORECASE):
+                matches.append(line_content.strip())
         if matches:
-            self.file_matches_found.emit(file_path, matches)
+            self.file_matches_found.emit(str(file_path_obj), matches)
     
-    def process_pdf_file(self, file_path, keyword):
+    def _process_pdf_file(self, file_path_obj: Path, keyword: str):
         lines = []
         try:
-            reader = PdfReader(file_path)
+            reader = PdfReader(file_path_obj) # PdfReader handles Path objects
             for page in reader.pages:
                 text = page.extract_text()
                 if text:
-                    lines.extend(text.split('\n'))
+                    lines.extend(text.splitlines()) # Use splitlines to be consistent
         except Exception as e:
-            self.error_occurred.emit("錯誤", f"無法處理 PDF {file_path}: {e}")
+            self.error_occurred.emit("PDF處理錯誤", f"無法處理 PDF {str(file_path_obj)}: {e}")
             return
         
         matches = []
-        for line in lines:
-            if re.search(re.escape(keyword), line, re.IGNORECASE):
-                matches.append(line.strip())
+        for line_content in lines:
+            if re.search(re.escape(keyword), line_content, re.IGNORECASE):
+                matches.append(line_content.strip())
         if matches:
-            self.file_matches_found.emit(file_path, matches)
+            self.file_matches_found.emit(str(file_path_obj), matches)
     
-    def process_docx_file(self, file_path, keyword):
+    def _process_docx_file(self, file_path_obj: Path, keyword: str):
         try:
-            doc = docx.Document(file_path)
+            doc = docx.Document(file_path_obj) # docx.Document handles Path objects
             lines = [para.text for para in doc.paragraphs]
         except Exception as e:
-            self.error_occurred.emit("錯誤", f"無法處理 Word 文件 {file_path}: {e}")
+            self.error_occurred.emit("Word處理錯誤", f"無法處理 Word 文件 {str(file_path_obj)}: {e}")
             return
         
         matches = []
-        for line in lines:
-            if re.search(re.escape(keyword), line, re.IGNORECASE):
-                matches.append(line.strip())
+        for line_content in lines:
+            if re.search(re.escape(keyword), line_content, re.IGNORECASE):
+                matches.append(line_content.strip())
         if matches:
-            self.file_matches_found.emit(file_path, matches)
+            self.file_matches_found.emit(str(file_path_obj), matches)
     
-    def process_xlsx_file(self, file_path, keyword):
+    def _process_xlsx_file(self, file_path_obj: Path, keyword: str):
         lines = []
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True)
+            # openpyxl.load_workbook handles Path objects
+            wb = openpyxl.load_workbook(file_path_obj, read_only=True, data_only=True) 
             for sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
                 for row in ws.iter_rows(values_only=True):
+                    # Convert all cell values to string and join, then search
                     row_text = " ".join(str(cell) for cell in row if cell is not None)
                     lines.append(row_text)
         except Exception as e:
-            self.error_occurred.emit("錯誤", f"無法處理 Excel 文件 {file_path}: {e}")
+            self.error_occurred.emit("Excel處理錯誤", f"無法處理 Excel 文件 {str(file_path_obj)}: {e}")
             return
         
         matches = []
-        for line in lines:
-            if re.search(re.escape(keyword), line, re.IGNORECASE):
-                matches.append(line.strip())
+        for line_content in lines:
+            if re.search(re.escape(keyword), line_content, re.IGNORECASE):
+                matches.append(line_content.strip())
         if matches:
-            self.file_matches_found.emit(file_path, matches)
+            self.file_matches_found.emit(str(file_path_obj), matches)
