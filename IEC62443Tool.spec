@@ -53,7 +53,7 @@ a = Analysis(
         'scipy.special._cdflib', 
         'sklearn.utils._weight_vector',
         'rapidfuzz', 
-    ] + collect_submodules('PyQt6.QtWebEngineCore'), 
+    ] + collect_submodules('PyQt6.QtWebEngineCore') + collect_submodules('file_search_module.converters'), 
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -76,9 +76,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False, # Changed UPX to False
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir=None, # Confirmed runtime_tmpdir=None
     console=False,
     disable_windowed_traceback=False,
     target_arch=None,
@@ -94,7 +94,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False, # Changed UPX to False
     upx_exclude=[],
     name=APP_NAME
 )

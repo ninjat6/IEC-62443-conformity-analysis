@@ -1,11 +1,13 @@
 import html
 import chardet
-import win32com.client
-import pythoncom
+# win32com.client and pythoncom removed
 import logging
-from pathlib import Path # Added
-from PyPDF2 import PdfReader
-import openpyxl
+from pathlib import Path 
+from PyPDF2 import PdfReader # type: ignore
+import openpyxl # type: ignore
+
+# Import the new specific DOCX converter
+from .docx_converter import convert_docx_to_html as _convert_docx_external
 
 # Configure logging (can be moved to a central logger utility if available)
 # Using a format that includes filename and line number for better debugging.
@@ -36,7 +38,7 @@ def convert_file_to_html(file_path_str: str) -> Path | None:
             logging.info(f"File is already HTML: {str(file_path_obj)}")
             return file_path_obj  # Return original Path object
         elif ext == "docx":
-            _convert_docx_to_html(file_path_obj, html_file_path)
+            _convert_docx_external(file_path_obj, html_file_path) # Call imported function
         elif ext == "txt":
             _convert_txt_to_html(file_path_obj, html_file_path)
         elif ext == "pdf":
@@ -59,43 +61,7 @@ def convert_file_to_html(file_path_str: str) -> Path | None:
         logging.error(f"Failed to convert file {str(file_path_obj)}: {e}", exc_info=True)
         return None
 
-def _convert_docx_to_html(docx_path_obj: Path, html_path_obj: Path):
-    """Converts DOCX to HTML using win32com."""
-    pythoncom.CoInitialize()
-    word = None
-    doc = None
-    created_new_instance = False
-
-    # win32com expects absolute string paths
-    docx_abs_str = str(docx_path_obj.resolve())
-    html_abs_str = str(html_path_obj.resolve())
-
-    try:
-        try:
-            word = win32com.client.GetActiveObject("Word.Application")
-            logging.info(f"Attached to existing Word instance for {docx_abs_str}.")
-        except:
-            word = win32com.client.Dispatch("Word.Application")
-            created_new_instance = True
-            logging.info(f"Created new Word instance for {docx_abs_str}.")
-
-        word.Visible = False
-        doc = word.Documents.Open(docx_abs_str, ReadOnly=True)
-        doc.SaveAs(html_abs_str, FileFormat=8)  # 8 = wdFormatHTML (Filtered HTML)
-        logging.info(f"DOCX conversion successful: {html_abs_str}")
-
-    except Exception as e:
-        logging.error(f"Failed to convert DOCX {docx_abs_str} to HTML {html_abs_str}: {e}", exc_info=True)
-        raise  # Re-raise to be caught by the main convert_file_to_html
-    finally:
-        if doc:
-            doc.Close(False)
-        if created_new_instance and word:
-            word.Quit()
-        # According to MSDN, CoUninitialize should be called for each successful call to CoInitialize.
-        # However, in scripts, it's often omitted or managed by the Python COM library wrapper upon exit.
-        # If issues arise with Word instances not closing, explicit CoUninitialize might be needed.
-        # pythoncom.CoUninitialize() 
+# _convert_docx_to_html method is removed from here.
 
 def _convert_txt_to_html(txt_path_obj: Path, html_path_obj: Path):
     """Converts TXT to HTML, detecting encoding."""
@@ -159,3 +125,6 @@ def _convert_xlsx_to_html(xlsx_path_obj: Path, html_path_obj: Path):
     except Exception as e:
         logging.error(f"Failed to convert XLSX {str(xlsx_path_obj)} to HTML: {e}", exc_info=True)
         raise
+
+# Transitional re-export for backward compatibility if other modules directly imported the specific converter
+from .docx_converter import convert_docx_to_html  # noqa: E402
