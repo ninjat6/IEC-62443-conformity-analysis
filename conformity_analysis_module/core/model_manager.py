@@ -6,11 +6,23 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer # Ensure this import is present
 # from huggingface_hub import snapshot_download # This line will be removed
 try:
-    # Try the newer import path first (for huggingface_hub >= 0.20)
-    from huggingface_hub.utils.errors import RepositoryNotFoundError
+    from huggingface_hub.errors import RepositoryNotFoundError      # Expected for huggingface_hub >=0.32
 except ModuleNotFoundError:
-    # Fallback to the older import path (for huggingface_hub < 0.20)
-    from huggingface_hub.utils._errors import RepositoryNotFoundError
+    try:
+        from huggingface_hub.utils.errors import RepositoryNotFoundError  # Fallback for 0.20 <= huggingface_hub < 0.32
+    except ModuleNotFoundError:
+        try:
+            from huggingface_hub.utils._errors import RepositoryNotFoundError # Fallback for huggingface_hub < 0.20
+        except ModuleNotFoundError:
+            # If all attempts fail, this indicates a critical issue with the huggingface_hub installation
+            # or an unexpected version/structure.
+            raise ImportError(
+                "Could not import RepositoryNotFoundError from huggingface_hub. "
+                "Tried paths: huggingface_hub.errors, huggingface_hub.utils.errors, "
+                "and huggingface_hub.utils._errors. "
+                "Please ensure huggingface_hub is installed correctly and is a compatible version "
+                "as specified in requirements.txt."
+            )
 
 from conformity_analysis_module.config.config import Config
 try:

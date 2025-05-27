@@ -1,4 +1,19 @@
 # model.py
+# Developer utility script for pre-downloading all required models.
+#
+# IMPORTANT FOR DEVELOPERS:
+# If you encounter import errors related to `huggingface_hub` or other
+# dependencies when running this script (e.g., "ModuleNotFoundError"),
+# please ensure:
+# 1. You have activated the correct Python virtual environment (venv).
+# 2. The virtual environment's packages are strictly installed from the
+#    project's `requirements.txt` file (e.g., using `pip install -r requirements.txt --force-reinstall`).
+# 3. Your `PYTHONPATH` environment variable (if set) is not interfering
+#    by pointing to other Python installations or conflicting libraries.
+#
+# This script relies on the centralized ModelManager, so any issues with
+# its dependencies (like huggingface_hub) will affect this script.
+# model.py
 # This script serves as a developer utility. Its primary purpose is to facilitate
 # the pre-downloading of all sentence-transformer models that are defined as supported
 # in the application's configuration (`conformity_analysis_module.config.config.Config.SUPPORTED_MODELS`).
