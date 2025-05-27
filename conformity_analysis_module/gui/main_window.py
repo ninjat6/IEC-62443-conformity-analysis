@@ -544,8 +544,8 @@ class ConformityAnalysisWindow(QMainWindow):
         
         # 模型選擇下拉框
         self.model_combo = QComboBox()
-        self.model_combo.addItem("🔤 all-MiniLM-L12-v2 (預設英文模型)", "models/all-MiniLM-L12-v2")
-        self.model_combo.addItem("🌐 paraphrase-multilingual-MiniLM-L12-v2 (增強中文支援)", "models/paraphrase-multilingual-MiniLM-L12-v2")
+        self.model_combo.addItem("🔤 all-MiniLM-L12-v2 (預設英文模型)", "all-MiniLM-L12-v2")
+        self.model_combo.addItem("🌐 paraphrase-multilingual-MiniLM-L12-v2 (增強中文支援)", "paraphrase-multilingual-MiniLM-L12-v2")
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         layout.addWidget(self.model_combo)
         
@@ -1258,11 +1258,11 @@ class ConformityAnalysisWindow(QMainWindow):
             return
 
         # 開始分析
-        selected_model = self.model_combo.currentData()
+        selected_model_identifier = self.model_combo.currentData()
         threshold_info = f"相似度閾值: {int(self.threshold_value * 100)}%"
         logger.info(f"Starting analysis with model: {selected_model}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
         
-        self.analyzer = Analyzer(model_name=selected_model)
+        self.analyzer = Analyzer(model_identifier=selected_model_identifier)
         self.analyze_btn.setEnabled(False)
         self.fill_worksheet_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
