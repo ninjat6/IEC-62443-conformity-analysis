@@ -4,7 +4,7 @@
 import json
 from pathlib import Path
 from huggingface_hub import snapshot_download
-from huggingface_hub.utils._errors import RepositoryNotFoundError
+from huggingface_hub.utils.errors import RepositoryNotFoundError
 
 from conformity_analysis_module.config.config import Config
 try:
