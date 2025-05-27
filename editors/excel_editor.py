@@ -1,14 +1,14 @@
 # editors/excel_editor.py
 import sys
-import os
 import json
+from pathlib import Path # Added for Path object usage
 from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QFileDialog, QWidget, QSplitter, QHeaderView, QAbstractItemView,
     QMessageBox, QScrollArea, QPushButton, QSizePolicy, QDialog, QLabel,
-    QApplication
+    QApplication, QProgressDialog # Added QProgressDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt # Qt was already imported
 from PyQt6.QtGui import QColor, QDropEvent
 from openpyxl import load_workbook
 
@@ -19,13 +19,21 @@ from widgets.draggable_value import DraggableValue
 from widgets.removable_block import RemovableBlock
 from file_search_module.ui.file_searcher import FileSearcher
 from conformity_analysis_module.gui.main_window import ConformityAnalysisWindow
+# Assuming path_utils.py is in the project root and accessible in PYTHONPATH
+from path_utils import get_bundled_resource_path
+# Assuming model.py is in the project root and accessible in PYTHONPATH
+from model import ensure_models_are_downloaded 
 
 class ExcelEditor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Excel JSON Drag & Drop Editor")
         self.setGeometry(100, 100, 1200, 800)
-        self.showMaximized()
+        
+        # Perform initial setup like model checking early
+        self._perform_initial_setup() # This will handle model downloads
+
+        self.showMaximized() # Show after initial setup if it's modal
 
         self.json_data = {}
         self.current_file = None
@@ -35,6 +43,44 @@ class ExcelEditor(QMainWindow):
         self.conformity_app = None  # 用於管理 ConformityAnalysis 的實例
 
         self.init_ui()
+
+    def _perform_initial_setup(self):
+        """Checks and downloads models, shows progress."""
+        self.progress_dialog = QProgressDialog("正在檢查模型...", "取消", 0, 0, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(False) # Manage closing manually
+        self.progress_dialog.setMinimumDuration(0) # Show immediately
+        self.progress_dialog.setValue(0) # Indeterminate state
+        self.progress_dialog.show()
+
+        _download_cancelled = False # Flag to track cancellation
+
+        def progress_callback(message: str):
+            nonlocal _download_cancelled
+            QApplication.processEvents() # Keep UI responsive
+            if self.progress_dialog.wasCanceled():
+                print("模型下載/檢查被用戶取消。")
+                _download_cancelled = True
+                # Ideally, raise a custom exception here that ensure_models_are_downloaded can catch
+                # or set a flag that it checks. For now, ensure_models_are_downloaded will complete.
+            self.progress_dialog.setLabelText(message)
+
+        try:
+            ensure_models_are_downloaded(progress_callback=progress_callback)
+            # If ensure_models_are_downloaded completes without raising an exception,
+            # and was not cancelled, it implies success or models already existed.
+            if _download_cancelled:
+                QMessageBox.warning(self, "模型檢查已取消", "模型檢查/下載過程已被用戶取消。部分功能可能無法正常運作。")
+            # else:
+                # QMessageBox.information(self, "模型準備就緒", "所有必要的模型都已準備就緒。")
+        except Exception as e:
+            # This catches exceptions re-raised by download_model_if_needed via ensure_models_are_downloaded
+            QMessageBox.critical(self, "模型下載失敗", 
+                                 f"下載或驗證模型時發生嚴重錯誤: {e}\n應用程式部分功能可能無法正常運作。")
+        finally:
+            if self.progress_dialog:
+                self.progress_dialog.close()
+                self.progress_dialog.deleteLater() # Ensure it's cleaned up
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -147,14 +193,21 @@ class ExcelEditor(QMainWindow):
         self.info_panel_visible = not self.info_panel_visible
 
     def load_excel(self):
-        file_path = os.path.join(os.getcwd(), "resources", "templates", "IEC62443_2_4d_2024-worksheet.xlsx")
-        if not os.path.exists(file_path):
-            print(f"檔案未找到: {file_path}")
+        # Use path_utils to get the path to the bundled Excel template
+        file_path_obj = get_bundled_resource_path("resources/templates/IEC62443_2_4d_2024-worksheet.xlsx")
+        
+        if not file_path_obj.exists():
+            QMessageBox.warning(self, "Error", f"Template Excel file not found at: {str(file_path_obj)}")
+            print(f"檔案未找到: {str(file_path_obj)}") # Keep console log for debugging
             return
 
-        self.current_file = file_path
-        workbook = load_workbook(file_path)
-        sheet = workbook.active
+        self.current_file = str(file_path_obj) # Store as string if needed elsewhere, or keep as Path
+        try:
+            workbook = load_workbook(file_path_obj) # openpyxl supports Path objects
+            sheet = workbook.active
+        except Exception as e:
+            QMessageBox.critical(self, "Error Loading Excel", f"Failed to load Excel file: {str(file_path_obj)}\nError: {e}")
+            return
 
         self.hidden_columns = ["Summary Level", "IEC 62443-2-4 Requirement"]
         column_headers = [sheet.cell(row=1, column=col).value for col in range(1, sheet.max_column + 1)]
@@ -190,13 +243,23 @@ class ExcelEditor(QMainWindow):
         dialog.show()
 
     def save_excel(self):
-        template_path = os.path.join(os.getcwd(), "resources", "templates", "IEC62443_2_4d_2024-worksheet.xlsx")
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Excel File", "", "Excel Files (*.xlsx)")
-        if not file_path:
+        # Use path_utils to get the path to the bundled Excel template
+        template_path_obj = get_bundled_resource_path("resources/templates/IEC62443_2_4d_2024-worksheet.xlsx")
+        
+        if not template_path_obj.exists():
+            QMessageBox.warning(self, "Error", f"Template Excel file not found: {str(template_path_obj)}")
             return
+
+        file_path_str, _ = QFileDialog.getSaveFileName(self, "Save Excel File", "", "Excel Files (*.xlsx)")
+        if not file_path_str:
+            return
+        
         try:
-            workbook = load_workbook(template_path)
+            # Load the template workbook
+            workbook = load_workbook(template_path_obj) # openpyxl supports Path objects
             sheet = workbook.active
+            
+            # Define column mapping (assuming this logic remains the same)
             column_map = {
                 "Applicant Role(s)": "D",
                 "Declared Maturity Level": "E",
@@ -609,11 +672,18 @@ class ExcelEditor(QMainWindow):
 
     def load_stage_data(self, hierarchy):
         try:
-            json_path = os.path.join(os.getcwd(), "resources", "output_json", "all_documents.json")
-            with open(json_path, "r", encoding="utf-8") as f:
+            # Use path_utils to get the path to the bundled JSON data file
+            json_path_obj = get_bundled_resource_path("resources/output_json/all_documents.json")
+            if not json_path_obj.exists():
+                QMessageBox.warning(self, "Error", f"Data file not found: {str(json_path_obj)}")
+                self.update_info_panel("Error", [QLabel(f"Data file not found: {str(json_path_obj)}")])
+                return
+
+            with open(json_path_obj, "r", encoding="utf-8") as f: # open() supports Path objects
                 all_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            self.update_info_panel("Error", [QLabel(f"Failed to load data: {e}")])
+        except (json.JSONDecodeError) as e: # FileNotFoundError handled by exists() check
+            QMessageBox.critical(self, "Error Loading Data", f"Failed to parse data file: {str(json_path_obj)}\nError: {e}")
+            self.update_info_panel("Error", [QLabel(f"Failed to parse data: {e}")])
             return
         if not hierarchy:
             filtered_data = sorted(set(item.split(" ")[0] for item in all_data if "[" in item and "]" in item))

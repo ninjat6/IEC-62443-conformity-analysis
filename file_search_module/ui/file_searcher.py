@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QLabel, QLineEdit, QPushButton, QFileDialog,
     QMessageBox, QProgressBar, QMenuBar, QMenu, QStatusBar, QScrollArea
 )
+from pathlib import Path
 
 from file_search_module.ui.results_container import ResultsContainer
 from file_search_module.ui.result_card import ResultCard
@@ -195,14 +196,16 @@ class FileSearcher(QMainWindow):
             self.folder_path.setText(folder)
     
     def start_search(self):
-        folder = self.folder_path.text().strip()
+        folder_str = self.folder_path.text().strip()
         keyword = self.keyword_input.text().strip()
-        if not folder:
+        if not folder_str:
             QMessageBox.warning(self, "警告", "請先選擇資料夾！")
             return
         if not keyword:
             QMessageBox.warning(self, "警告", "請輸入關鍵字！")
             return
+        
+        folder_path_obj = Path(folder_str)
         
         # 清除舊結果
         for i in reversed(range(self.results_layout.count())):
@@ -217,7 +220,8 @@ class FileSearcher(QMainWindow):
         self.cancel_button.setEnabled(True)
         
         self.worker_thread = QThread()
-        self.search_worker = SearchWorker(folder, keyword)
+        # Assuming SearchWorker will be updated to handle Path objects
+        self.search_worker = SearchWorker(folder_path_obj, keyword)
         self.search_worker.moveToThread(self.worker_thread)
         
         self.worker_thread.started.connect(self.search_worker.start_search)
@@ -293,11 +297,16 @@ class FileSearcher(QMainWindow):
             "支援 TXT, PDF, DOCX, XLSX, HTML 文件全文搜尋。"
         )
     
-    def open_file_viewer(self, file_path, search_keyword):
-        html_file = convert_file_to_html(file_path)
-        if not html_file:
-            QMessageBox.warning(self, "轉換錯誤", f"無法轉換檔案: {file_path}")
+    def open_file_viewer(self, file_path: str, search_keyword: str):
+        file_path_obj = Path(file_path)
+        # Assuming convert_file_to_html will be updated to accept Path and return Path
+        html_path_obj = convert_file_to_html(file_path_obj) 
+        
+        if not html_path_obj:
+            QMessageBox.warning(self, "轉換錯誤", f"無法轉換檔案: {str(file_path_obj)}")
             return
-        viewer = HtmlViewer(html_file, search_keyword)
+            
+        # Assuming HtmlViewer will be updated to accept Path
+        viewer = HtmlViewer(html_path_obj, search_keyword)
         viewer.show()
         self.open_viewers.append(viewer)
