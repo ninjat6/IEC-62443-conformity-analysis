@@ -146,6 +146,12 @@ class ConformityAnalysisWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to load requirements: {e}", exc_info=True)
             self.requirements = {}
+            # Add this QMessageBox
+            QMessageBox.warning(
+                self, 
+                "載入錯誤", 
+                f"無法載入需求文件。\n請檢查 'requirements.json' 是否存在且格式正確。\n\n錯誤詳情: {e}"
+            )
             
         self.chapter_names = {
             "SP.01": "人員配備", "SP.02": "保障措施", "SP.03": "架構設計",
@@ -1260,7 +1266,7 @@ class ConformityAnalysisWindow(QMainWindow):
         # 開始分析
         selected_model_identifier = self.model_combo.currentData()
         threshold_info = f"相似度閾值: {int(self.threshold_value * 100)}%"
-        logger.info(f"Starting analysis with model: {selected_model}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
+        logger.info(f"Starting analysis with model: {selected_model_identifier}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
         
         self.analyzer = Analyzer(model_identifier=selected_model_identifier)
         self.analyze_btn.setEnabled(False)
