@@ -2,6 +2,8 @@
 import json
 import re
 from pathlib import Path
+import numpy
+import sklearn
 from sentence_transformers import SentenceTransformer, util
 from conformity_analysis_module.core.file_processor import FileProcessor
 from conformity_analysis_module.utils.logger import logger
@@ -37,6 +39,7 @@ class Analyzer:
                           user that analysis cannot proceed).
         """
         self.model_manager = ModelManager() # Instantiate the manager responsible for model fetching and validation.
+        logger.debug(f"Using NumPy version: {numpy.__version__}, scikit-learn version: {sklearn.__version__}") # New line
         
         # The `model_identifier` parameter is expected to be one of the short names
         # (e.g., "all-MiniLM-L12-v2") defined in `Config.SUPPORTED_MODELS`.
