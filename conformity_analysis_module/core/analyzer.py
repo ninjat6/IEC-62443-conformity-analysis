@@ -6,11 +6,19 @@ from sentence_transformers import SentenceTransformer, util
 from conformity_analysis_module.core.file_processor import FileProcessor
 from conformity_analysis_module.utils.logger import logger
 from conformity_analysis_module.config import Config
+from path_utils import get_specific_model_dir
 
 class Analyzer:
-    def __init__(self, model_name='models/all-MiniLM-L12-v2'):
-        self.model = SentenceTransformer(model_name)
-        self.sp_folders = {}  # 存儲SP子資料夾映射
+    def __init__(self, model_identifier='all-MiniLM-L12-v2'):
+        local_model_path = get_specific_model_dir(model_identifier)
+        if not local_model_path.exists():
+            logger.error(f"Model '{model_identifier}' not found at expected path: {str(local_model_path)}. "
+                         "Please ensure models were downloaded correctly, possibly by restarting the application.")
+            logger.warning(f"Attempting to load '{model_identifier}' directly. This may trigger a new download if it's a Hugging Face ID and not found in default cache.")
+            self.model = SentenceTransformer(model_identifier)
+        else:
+            logger.info(f"Loading model '{model_identifier}' from local path: {str(local_model_path)}")
+            self.model = SentenceTransformer(str(local_model_path))
         
     def analyze(self, folder_path: str, requirements: dict, threshold: float = 0.65):
         base_path = Path(folder_path)
