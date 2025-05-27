@@ -1512,7 +1512,7 @@ class ConformityAnalysisWindow(QMainWindow):
             # If it were to take paths:
             # success, message = WorksheetUpdater.update_worksheet(Config.ANALYSIS_OUTPUT, Config.WORKSHEET_FILE)
             # For now, sticking to the existing call signature from the provided code.
-            success, message = WorksheetUpdater.update_worksheet()
+            success, message = WorksheetUpdater.update_worksheet(Config.ANALYSIS_OUTPUT)
             if success:
                 QMessageBox.information(self, "✅ 成功", f"📝 {message}\nWorksheet 已更新: {str(Config.WORKSHEET_FILE)}")
                 self.status_bar.showMessage(f"✅ Worksheet 填入完成: {str(Config.WORKSHEET_FILE)}", 8000)
