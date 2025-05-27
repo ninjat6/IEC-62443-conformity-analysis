@@ -6,19 +6,69 @@ from sentence_transformers import SentenceTransformer, util
 from conformity_analysis_module.core.file_processor import FileProcessor
 from conformity_analysis_module.utils.logger import logger
 from conformity_analysis_module.config import Config
-from path_utils import get_specific_model_dir
+from .model_manager import ModelManager
 
 class Analyzer:
     def __init__(self, model_identifier='all-MiniLM-L12-v2'):
-        local_model_path = get_specific_model_dir(model_identifier)
-        if not local_model_path.exists():
-            logger.error(f"Model '{model_identifier}' not found at expected path: {str(local_model_path)}. "
-                         "Please ensure models were downloaded correctly, possibly by restarting the application.")
-            logger.warning(f"Attempting to load '{model_identifier}' directly. This may trigger a new download if it's a Hugging Face ID and not found in default cache.")
-            self.model = SentenceTransformer(model_identifier)
+        """
+        Initializes the Analyzer with a specified sentence-transformer model.
+
+        The initialization process involves:
+        1. Instantiating a ModelManager.
+        2. Using the ModelManager to ensure the specified `model_identifier` is available
+           and valid in the local cache. The ModelManager will handle downloading or
+           repairing the model if necessary.
+        3. Loading the validated model path into a SentenceTransformer instance.
+        4. If the model cannot be made available or loaded, a RuntimeError is raised,
+           signaling a critical failure that the calling code (e.g., the GUI) must handle.
+
+        Args:
+            model_identifier (str): The short name of the model to be used for analysis.
+                                    This identifier must correspond to one of the "name"
+                                    fields in `Config.SUPPORTED_MODELS`.
+                                    Defaults to 'all-MiniLM-L12-v2'.
+
+        Raises:
+            RuntimeError: If the specified model cannot be made available by ModelManager
+                          (e.g., download fails, validation fails after download) or if
+                          SentenceTransformer fails to load the model from the validated path.
+                          This error indicates that the Analyzer cannot perform its duties
+                          and should be handled by the calling code (e.g., by informing the
+                          user that analysis cannot proceed).
+        """
+        self.model_manager = ModelManager() # Instantiate the manager responsible for model fetching and validation.
+        
+        # The `model_identifier` parameter is expected to be one of the short names
+        # (e.g., "all-MiniLM-L12-v2") defined in `Config.SUPPORTED_MODELS`.
+        logger.info(f"Initializing Analyzer with model identifier: {model_identifier}")
+        
+        # `ensure_model_available` checks local cache validity and downloads/updates if needed.
+        # It returns the path to the valid model directory or None if it fails.
+        valid_model_path = self.model_manager.ensure_model_available(model_identifier)
+
+        if valid_model_path:
+            logger.info(f"Loading SentenceTransformer model '{model_identifier}' from validated path: {valid_model_path}")
+            try:
+                # Dynamically import SentenceTransformer here to ensure it's only imported when needed
+                # and to potentially catch import errors if the environment is severely broken,
+                # though pip dependencies should handle this.
+                from sentence_transformers import SentenceTransformer
+                self.model = SentenceTransformer(str(valid_model_path)) # Load the model.
+                logger.info(f"Model '{model_identifier}' loaded successfully into Analyzer.")
+            except Exception as e:
+                # This is a critical failure: the model was validated by ModelManager,
+                # but SentenceTransformer still failed to load it.
+                logger.critical(f"CRITICAL: Failed to load SentenceTransformer model from '{valid_model_path}' even after validation/download. Error: {e}", exc_info=True)
+                # Raising RuntimeError here is important because the Analyzer cannot function
+                # without a model. The calling code (e.g., GUI) must catch this and handle it gracefully,
+                # for instance, by disabling analysis features and notifying the user.
+                raise RuntimeError(f"Failed to initialize SentenceTransformer model '{model_identifier}' after ensuring availability. Check logs.") from e
         else:
-            logger.info(f"Loading model '{model_identifier}' from local path: {str(local_model_path)}")
-            self.model = SentenceTransformer(str(local_model_path))
+            # This is also a critical failure: ModelManager could not provide a valid model path.
+            # This could be due to network issues, disk space problems, or the model being unsupported.
+            logger.critical(f"CRITICAL: Model '{model_identifier}' could not be made available by ModelManager. Analyzer cannot function.")
+            # Similar to the above, this RuntimeError must be handled by the caller.
+            raise RuntimeError(f"Model '{model_identifier}' not available. Check logs for details (e.g., network issues, disk space, unsupported model).")
         
     def analyze(self, folder_path: str, requirements: dict, threshold: float = 0.65):
         base_path = Path(folder_path)
