@@ -1,112 +1,67 @@
-from pathlib import Path # Ensure Path is imported if not already via path_utils
-from sentence_transformers import SentenceTransformer
-# path_utils.py is assumed to be in PYTHONPATH (e.g., project root)
-from path_utils import get_specific_model_dir 
-# get_models_base_dir is not strictly needed here if get_specific_model_dir creates parent dirs
+# model.py
+# This script serves as a developer utility. Its primary purpose is to facilitate
+# the pre-downloading of all sentence-transformer models that are defined as supported
+# in the application's configuration (`conformity_analysis_module.config.config.Config.SUPPORTED_MODELS`).
+# Running this script ensures that all necessary models are cached locally, which can be
+# useful for setting up a development environment or for preparing a deployment package
+# where models should be included or readily available without requiring download on first run by end-users.
 
-REQUIRED_MODELS = [
-    {"id": "sentence-transformers/all-MiniLM-L12-v2", "local_name": "all-MiniLM-L12-v2"},
-    {"id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", "local_name": "paraphrase-multilingual-MiniLM-L12-v2"},
-]
+# It leverages the centralized ModelManager from the `conformity_analysis_module.core.model_manager`,
+# which handles the actual logic for downloading, caching, and validating models.
+# This script is not intended to be part of the main packaged application's GUI flow
+# but rather as a standalone tool for developers.
 
-def download_model_if_needed(model_id: str, local_name: str, progress_callback=None) -> bool:
-    """
-    Downloads a single model if it doesn't exist locally.
-    
-    Args:
-        model_id (str): The Hugging Face model ID (e.g., 'sentence-transformers/all-MiniLM-L12-v2').
-        local_name (str): The local directory name to save the model under (e.g., 'all-MiniLM-L12-v2').
-        progress_callback (optional): A function to call with progress updates (receives a string message).
+import logging # Used for basic logging setup if the main application's logger isn't active.
+from conformity_analysis_module.config.config import Config # To access the list of supported models.
+from conformity_analysis_module.core.model_manager import ModelManager # The core class for model operations.
 
-    Returns:
-        bool: True if a download was attempted (successfully or not), False if the model already existed.
-              Note: If download fails, an exception is raised.
-    
-    Raises:
-        Exception: If there's an error during model download or saving.
-    """
-    model_path: Path = get_specific_model_dir(local_name) # get_specific_model_dir returns Path
-
-    if not model_path.exists():
-        msg_downloading = f"正在下載 {model_id} 模型至 {str(model_path)}..."
-        print(msg_downloading)
-        if progress_callback:
-            progress_callback(msg_downloading)
-        
-        try:
-            model = SentenceTransformer(model_id)
-            # Ensure parent directories for model_path are created by get_specific_model_dir
-            model.save(str(model_path)) # SentenceTransformer.save() expects a string path
-            
-            msg_saved = f"模型 {model_id} 已儲存至 {str(model_path)}"
-            print(msg_saved)
-            if progress_callback:
-                progress_callback(msg_saved)
-            return True # Download attempted and (presumably) succeeded
-        except Exception as e:
-            msg_error = f"下載或儲存模型 {model_id} 時發生錯誤: {e}"
-            print(msg_error)
-            if progress_callback:
-                progress_callback(msg_error)
-            raise # Re-raise the exception to signal failure to the caller
-    else:
-        msg_exists = f"模型 {local_name} 已存在於 {str(model_path)}"
-        print(msg_exists)
-        if progress_callback:
-            progress_callback(msg_exists)
-        return False # Model already exists, no download attempted
-
-def ensure_models_are_downloaded(progress_callback=None):
-    """
-    Ensures all models defined in REQUIRED_MODELS are downloaded if they don't already exist.
-    
-    Args:
-        progress_callback (optional): A function to call with progress updates.
-    """
-    all_models_ok = True
-    for model_info in REQUIRED_MODELS:
-        model_id = model_info["id"]
-        local_name = model_info["local_name"]
-        try:
-            print(f"檢查模型: {local_name} (ID: {model_id})")
-            if progress_callback:
-                progress_callback(f"正在檢查模型: {local_name}...")
-            
-            download_model_if_needed(model_id, local_name, progress_callback)
-            
-            # Brief confirmation after check/download attempt for this model
-            # (more detailed messages come from download_model_if_needed)
-            if progress_callback:
-                progress_callback(f"模型 {local_name} 檢查完畢。")
-
-        except Exception as e:
-            all_models_ok = False
-            # Error message already printed by download_model_if_needed or its call
-            # Additional context for this higher-level function
-            err_msg = f"確保模型 {model_id} (本機名稱: {local_name}) 可用時發生嚴重錯誤: {e}"
-            print(err_msg)
-            if progress_callback:
-                progress_callback(err_msg)
-            # Depending on application policy, one might choose to stop here or continue.
-            # For now, it continues with other models.
-    
-    if all_models_ok:
-        final_msg = "所有必要模型均已檢查並準備就緒。"
-        print(final_msg)
-        if progress_callback:
-            progress_callback(final_msg)
-    else:
-        final_msg = "部分模型未能成功下載或驗證，請檢查上述錯誤訊息。"
-        print(final_msg)
-        if progress_callback:
-            progress_callback(final_msg)
-
+# Note: The previous, script-specific model download logic (like REQUIRED_MODELS list,
+# download_model_if_needed, and ensure_models_are_downloaded functions that might have
+# existed in older versions of this file) has been removed. All such functionality
+# is now centralized within the ModelManager class, making this script a simple
+# consumer of ModelManager.
 
 if __name__ == '__main__':
-    # Example of using a simple print function as a progress callback
-    def console_progress_callback(message: str):
-        print(f"MAIN_APP_PROGRESS: {message}")
+    # This block executes only when the script is run directly (e.g., `python model.py`).
+    
+    # Sets up basic logging for this script execution. This is important because
+    # ModelManager itself uses logging. If the main application's logger (which might
+    # be more complex, e.g., writing to files) isn't initialized when this script runs,
+    # this basicConfig ensures that messages from ModelManager (and this script)
+    # are visible on the console.
+    logging.basicConfig(
+        level=logging.INFO, 
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    # Get a specific logger instance for this script's own messages, distinct from ModelManager's logger if needed.
+    logger = logging.getLogger(__name__) 
 
-    print("正在檢查並下載所有必要的模型...")
-    ensure_models_are_downloaded(progress_callback=console_progress_callback)
-    print("模型檢查流程完成。")
+    def console_progress_callback(message: str):
+        """
+        A simple callback function to print progress messages to the console.
+        This function is passed to ModelManager's methods that support progress reporting.
+        It helps in monitoring the status of model downloads and checks when running this script.
+        A distinct prefix "DOWNLOAD_SCRIPT_PROGRESS:" is used for messages from this callback
+        to differentiate them from ModelManager's internal log messages if both are outputting
+        to the same console.
+        """
+        logger.info(f"DOWNLOAD_SCRIPT_PROGRESS: {message}")
+
+    logger.info("Starting developer script to ensure all models are downloaded...")
+    
+    # Instantiate the ModelManager. This object will be used to manage model operations.
+    manager = ModelManager()
+    
+    # Call the `ensure_all_models_available` method of ModelManager.
+    # This method iterates through all models defined in `Config.SUPPORTED_MODELS`,
+    # checks if they are valid in the local cache, and downloads/repairs them if necessary.
+    # The `console_progress_callback` is passed to provide real-time feedback on the console.
+    all_models_ready = manager.ensure_all_models_available(progress_callback=console_progress_callback)
+    
+    # Report the overall result of the operation.
+    if all_models_ready:
+        logger.info("All supported models have been checked and are available in the local cache.")
+    else:
+        logger.error("One or more models could not be made available. Please check the logs above for specific error messages.")
+    
+    logger.info("Developer model download script finished.")

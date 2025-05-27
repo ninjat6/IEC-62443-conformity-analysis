@@ -74,19 +74,33 @@ python main.py
 
 ## Model Management in the Packaged Application
 
-On the first run for a new model, or if a cached model is found to be corrupted, the application will attempt to download the necessary model files from Hugging Face Hub. This initial download requires an active internet connection.
+This section describes how the packaged application (e.g., `IEC62443Tool.exe`) handles the language models required for analysis.
 
-Models are cached locally on your system in a user-specific directory to speed up subsequent uses and enable offline functionality. The typical cache locations are:
+**1. Initial Application Startup (Packaged `.exe`):**
+When you run the packaged application for the first time, it will automatically attempt to download all supported sentence-transformer models listed in its configuration. This process occurs *before the main application window appears*. A progress dialog will be displayed to show the status of these downloads. This initial setup requires an active internet connection. If any model is already cached and valid, it will be skipped. If a cached model is found to be corrupted, it will be re-downloaded.
+
+**2. Caching:**
+Downloaded models are cached in a user-specific directory on your computer. This allows the application to access them quickly on subsequent uses without re-downloading. The typical cache locations are:
 *   **Windows:** `C:\Users\<YourUser>\AppData\Local\CyberAI\IEC62443Tool\models`
 *   **Linux:** `~/.local/share/CyberAI/IEC62443Tool/models`
 *   **macOS:** `~/Library/Application Support/CyberAI/IEC62443Tool/models`
-(Please replace `<YourUser>` with your actual username.)
+(Please replace `<YourUser>` with your actual username.) The `CyberAI\IEC62443Tool` part corresponds to the `APP_AUTHOR` and `APP_NAME` defined in the application's path utilities.
 
-Once a model is successfully downloaded and cached, the application will use this local copy for all future operations with that model. This allows for offline use when no internet connection is available.
+**3. Subsequent Runs & Offline Use:**
+Once all models have been successfully downloaded and cached during the initial startup, the application will load them from this local storage for all analysis tasks. This means that after the initial setup, the application and its analysis features can be used offline, without an active internet connection, as long as the cached models remain valid.
 
-If the application detects that a cached model's configuration file (`config.json`) is missing or corrupted, it will attempt to repair the model by re-downloading it from Hugging Face Hub during the next run. This repair process also requires an internet connection.
+**4. Model Repair:**
+The application includes a validation check for cached models (specifically for `config.json`). If it detects that a model's core configuration file is missing or corrupted during the initial startup check (or when a model is specifically requested by the Analyzer if not pre-checked), it will attempt to re-download that model from the Hugging Face Hub to repair it. This repair process also requires an active internet connection and will be shown in the startup progress dialog.
 
-Please note that each language model can occupy several hundred megabytes of disk space. Ensure you have adequate free space in the cache directory location.
+**5. Storage Considerations:**
+Sentence-transformer models can vary in size. Typically, each model might consume a few hundred megabytes of disk space (e.g., `all-MiniLM-L12-v2` is around 230MB, `paraphrase-multilingual-MiniLM-L12-v2` is around 470MB). Please ensure you have adequate free space in the cache directory location, as the application will attempt to download all supported models.
+
+**6. Developer Pre-Caching Script:**
+For developers, or for preparing an environment where initial online downloads by the packaged `.exe` are undesirable, all supported models can be pre-downloaded and cached by running the following script from the project root:
+```bash
+python model.py
+```
+This script uses the same `ModelManager` as the main application and will download all models defined in `Config.SUPPORTED_MODELS` to the correct local cache directory. Progress will be displayed in the console. Running this script before building the `.exe` or distributing the application can simplify the first-run experience for end-users if the models are pre-cached on their system or if the cache directory can be pre-populated.
 
 ## Building the Executable
 

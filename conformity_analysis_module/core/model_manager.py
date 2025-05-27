@@ -3,7 +3,8 @@
 # sentence-transformer models used in the conformity analysis.
 import json
 from pathlib import Path
-from huggingface_hub import snapshot_download
+from sentence_transformers import SentenceTransformer # Ensure this import is present
+# from huggingface_hub import snapshot_download # This line will be removed
 try:
     # Try the newer import path first (for huggingface_hub >= 0.20)
     from huggingface_hub.utils.errors import RepositoryNotFoundError
@@ -61,49 +62,89 @@ class ModelManager:
         logger.warning(f"Model info not found for '{model_name_or_hf_id}' in Config.SUPPORTED_MODELS.")
         return None
 
-    def download_model(self, model_name: str) -> Path | None:
+    # (Inside ModelManager class)
+    def download_model(self, model_name: str, progress_callback: callable = None) -> Path | None:
         """
-        Downloads a specified model from Hugging Face Hub to a local cache directory.
+        Downloads a model specified by its short name. This method uses SentenceTransformer
+        to first load the model from Hugging Face (which handles the actual download to
+        SentenceTransformer's own cache or uses an existing cache if the model was previously
+        downloaded by SentenceTransformer for any reason). Then, it uses `model.save()`
+        to copy the essential model files to the application's specific local cache directory
+        (`local_model_dir`). The `model.save()` method is beneficial as it typically saves
+        only the necessary components (e.g., configs, PyTorch model, tokenizer files),
+        potentially resulting in a smaller storage footprint than the full Hugging Face cache.
 
         Args:
-            model_name: The short name of the model to download (must be defined in Config.SUPPORTED_MODELS).
+            model_name: The short name of the model (e.g., "all-MiniLM-L12-v2") as defined
+                        in Config.SUPPORTED_MODELS.
+            progress_callback: An optional callable that accepts a string message. It's used
+                               to report progress and status updates (e.g., to a GUI dialog).
+                               Messages include creation of cache directory, download initiation,
+                               saving process, success, or error details.
 
         Returns:
-            A Path object to the local directory of the downloaded model if successful, otherwise None.
+            Path to the application-specific local model directory if download and save
+            are successful, None otherwise.
         """
         model_info = self._get_model_info(model_name)
         if not model_info:
-            logger.error(f"Cannot download model: '{model_name}' is not defined in Config.SUPPORTED_MODELS.")
+            err_msg = f"Cannot download model: '{model_name}' is not defined in Config.SUPPORTED_MODELS."
+            logger.error(err_msg)
+            if progress_callback: # Notify callback about the failure.
+                progress_callback(err_msg)
             return None
 
-        hf_identifier = model_info["hf_identifier"] # Full Hugging Face ID for download.
-        # Determine the specific local directory for this model using its short name.
+        hf_identifier = model_info["hf_identifier"] # Full Hugging Face ID for downloading.
+        # Target directory within the application's managed cache.
         local_model_dir = Config.GET_SPECIFIC_MODEL_DIR(model_info["name"])
 
-        # Although snapshot_download can create the directory, we log its creation explicitly if it doesn't exist.
+        # Ensure the target directory for our application's cache exists.
         if not local_model_dir.exists():
             local_model_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Created local directory for model '{model_name}': {local_model_dir}")
+            if progress_callback:
+                progress_callback(f"Created cache directory: {local_model_dir}")
+        
+        msg_downloading = f"Downloading model '{hf_identifier}' via SentenceTransformer library..."
+        logger.info(msg_downloading)
+        if progress_callback: # Report download initiation.
+            progress_callback(msg_downloading)
 
-        logger.info(f"Attempting to download/update model '{hf_identifier}' to '{local_model_dir}'...")
         try:
-            # Use huggingface_hub's snapshot_download to fetch the model files.
-            snapshot_download(
-                repo_id=hf_identifier,
-                local_dir=local_model_dir,
-                # local_dir_use_symlinks=False is generally safer for PyInstaller bundles,
-                # ensuring actual files are copied rather than symlinks that might break.
-                local_dir_use_symlinks=False,
-                resume_download=True, # Allows resuming interrupted downloads.
-            )
-            logger.info(f"Model '{hf_identifier}' downloaded/updated successfully at '{local_model_dir}'.")
+            # Step 1: Load the model using SentenceTransformer.
+            # This will download the model from Hugging Face Hub to SentenceTransformer's
+            # internal cache if not already present there, or use its existing cache.
+            # This step ensures all necessary files are fetched from the Hub.
+            model = SentenceTransformer(hf_identifier) 
+
+            msg_saving = f"Saving model '{hf_identifier}' to application cache '{local_model_dir}'..."
+            logger.info(msg_saving)
+            if progress_callback: # Report that the model is now being saved to our specific location.
+                progress_callback(msg_saving)
+            
+            # Step 2: Save the loaded model to our application-specific directory.
+            # The `model.save()` method is designed to save only the essential files
+            # needed to run the model (e.g., config files, model weights, tokenizer files),
+            # which can be more disk-space efficient than copying the entire Hugging Face cache directory.
+            model.save(str(local_model_dir))
+            
+            msg_success = f"Model '{hf_identifier}' downloaded and saved successfully to '{local_model_dir}'."
+            logger.info(msg_success)
+            if progress_callback: # Report successful completion.
+                progress_callback(msg_success)
             return local_model_dir
-        except RepositoryNotFoundError:
-            # Specific error if the model ID doesn't exist on Hugging Face Hub.
-            logger.error(f"Model repository not found on Hugging Face Hub: '{hf_identifier}'.")
-        except Exception as e:
-            # Catch-all for other potential errors during download (network issues, disk space, etc.).
-            logger.error(f"An error occurred while downloading model '{hf_identifier}': {e}", exc_info=True)
+            
+        except RepositoryNotFoundError: # Specific error for non-existent models on HF Hub.
+            err_msg = f"Model repository not found on Hugging Face Hub: '{hf_identifier}'."
+            logger.error(err_msg)
+            if progress_callback:
+                progress_callback(err_msg)
+        except Exception as e: # Catch other potential errors (network, disk space, etc.).
+            err_msg = f"An error occurred while downloading/saving model '{hf_identifier}': {e}"
+            logger.error(err_msg, exc_info=True)
+            if progress_callback:
+                progress_callback(f"{err_msg} - Check logs for details.")
+        
         return None
 
     # This method is part of the ModelManager class.
@@ -169,41 +210,111 @@ class ModelManager:
         return True
 
     # This method is part of the ModelManager class.
-    def ensure_model_available(self, model_name: str) -> Path | None:
+    def ensure_model_available(self, model_name: str, progress_callback: callable = None) -> Path | None:
         """
-        Ensures a specific model is available and valid in the local cache.
-        If the model is not found locally, or if it's found but deemed invalid
-        (e.g., missing 'config.json'), it attempts to download (or re-download) it.
-        This is the primary method clients should use to get a model path.
+        Ensures a specific model (defined by its short name) is available and valid in the
+        application's local cache. This is the primary method other parts of the application
+        should use to get a model path before attempting to load it.
+
+        The process is:
+        1. Check if the model is supported (defined in Config.SUPPORTED_MODELS).
+        2. Check if the model is already locally cached and valid using `is_model_valid()`.
+           - If valid, its local path is returned, and `progress_callback` is notified.
+        3. If not valid or not present, attempt to download (or re-download) it using `download_model()`.
+           - `download_model` itself uses `progress_callback` for detailed download status.
+           - `progress_callback` is also notified that a repair/download is being attempted.
 
         Args:
-            model_name: The short name of the model (e.g., "all-MiniLM-L12-v2")
-                        as defined in Config.SUPPORTED_MODELS.
+            model_name: The short name of the model (e.g., "all-MiniLM-L12-v2").
+            progress_callback: An optional callable for status updates. It's passed down
+                               to `download_model` if a download is necessary.
 
         Returns:
-            A Path object to the valid local model directory if successful, otherwise None.
+            Path to the valid local model directory if successful, None otherwise.
         """
-        # First, verify if the requested model_name is among the supported models.
         model_info = self._get_model_info(model_name)
         if not model_info:
-            # _get_model_info already logs a warning if model_name is not in SUPPORTED_MODELS.
-            logger.error(f"Cannot ensure model availability: '{model_name}' is not a supported model name.")
+            err_msg = f"Cannot ensure model availability: '{model_name}' is not a supported model name."
+            logger.error(err_msg)
+            if progress_callback: # Notify callback about the failure to find model in config.
+                progress_callback(err_msg)
             return None
 
-        # Determine the expected local directory using the model's short name from model_info.
         local_model_dir = Config.GET_SPECIFIC_MODEL_DIR(model_info["name"])
 
-        # Check if the model is already cached and valid.
-        # The is_model_valid method handles logging for various invalid states.
-        if self.is_model_valid(model_name):
-            logger.info(f"Model '{model_name}' is already available and valid at '{local_model_dir}'.")
+        if self.is_model_valid(model_name): # Check validity (and existence).
+            msg_valid = f"Model '{model_name}' is already available and valid at '{local_model_dir}'."
+            logger.info(msg_valid)
+            if progress_callback: # Notify callback that model is ready.
+                progress_callback(msg_valid)
             return local_model_dir
         else:
-            # If the model is not valid or not present, attempt to download it.
-            # is_model_valid would have logged the reason for invalidity.
-            logger.warning(f"Model '{model_name}' found invalid or incomplete. Attempting repair via (re)download.")
-            # download_model will handle the download process and related logging.
-            return self.download_model(model_name)
+            # If model is not valid (or not found by is_model_valid), attempt download.
+            # is_model_valid would have logged the specific reason for invalidity.
+            msg_repair = f"Model '{model_name}' found invalid or incomplete. Attempting repair via (re)download."
+            logger.warning(msg_repair)
+            if progress_callback: # Notify callback about the download attempt.
+                progress_callback(msg_repair)
+            # Pass the progress_callback to download_model for detailed download progress.
+            return self.download_model(model_name, progress_callback=progress_callback)
+
+    # (Inside ModelManager class)
+    def ensure_all_models_available(self, progress_callback: callable = None) -> bool:
+        """
+        Iterates through all models listed in `Config.SUPPORTED_MODELS` and ensures each
+        one is available and valid in the local cache using `ensure_model_available`.
+        This is useful for pre-downloading all models or for a startup check.
+
+        Args:
+            progress_callback: An optional callable for status updates. It's passed down
+                               to `ensure_model_available` (and thus to `download_model`)
+                               for each model being processed.
+
+        Returns:
+            True if all supported models are successfully made available and are valid,
+            False if any model fails the process.
+        """
+        all_successful = True # Flag to track overall success.
+        logger.info("Starting check for all supported models...")
+        if progress_callback: # Notify callback about the start of the overall process.
+            progress_callback("Starting check for all supported models...")
+
+        for model_info in self.supported_models:
+            model_name = model_info["name"]
+            msg_checking = f"Processing model: {model_name} (ID: {model_info['hf_identifier']})"
+            logger.info(msg_checking)
+            if progress_callback: # Notify callback about which model is currently being processed.
+                progress_callback(msg_checking)
+
+            # Call ensure_model_available for each model. This method handles validation,
+            # download if needed, and uses the progress_callback for its own detailed updates.
+            if not self.ensure_model_available(model_name, progress_callback=progress_callback):
+                # If ensure_model_available returns None, it means that model could not be
+                # made available (either validation failed after attempts or download failed).
+                err_msg = f"Failed to ensure model '{model_name}' is available. Check logs for details."
+                logger.error(err_msg)
+                # No specific progress_callback here as ensure_model_available (and download_model)
+                # would have already reported the specific failure reason.
+                all_successful = False # Mark that at least one model failed.
+            else:
+                # If ensure_model_available succeeded, it would have already called the progress_callback
+                # with "Model '...' is already available and valid" or with download success messages.
+                # We can add a summary message here if desired.
+                if progress_callback:
+                     progress_callback(f"Model '{model_name}' successfully processed and available.")
+
+
+        final_msg = "All supported models check completed."
+        if all_successful:
+            final_msg += " All models are now available and valid."
+        else:
+            final_msg += " One or more models could not be made available. Please review messages above and logs."
+        
+        logger.info(final_msg)
+        if progress_callback: # Notify callback about the overall result.
+            progress_callback(final_msg)
+            
+        return all_successful
 
 if __name__ == '__main__':
     # This section is for basic testing and demonstration if the script is run directly.
@@ -215,14 +326,21 @@ if __name__ == '__main__':
     logger.info("Directly testing ModelManager...")
     manager = ModelManager() # Instantiate the manager.
 
+    # (Inside if __name__ == '__main__' block)
+    # ...
+    def print_progress(message: str):
+        print(f"Progress: {message}")
+
     # Check if there are any models defined in the configuration to test with.
     if Config.SUPPORTED_MODELS:
         # Select the first model from the configuration for testing.
         test_model_name = Config.SUPPORTED_MODELS[0]["name"]
-        logger.info(f"Attempting to download test model: {test_model_name} from {Config.SUPPORTED_MODELS[0]['hf_identifier']}")
+        # logger.info(f"Attempting to download test model: {test_model_name} from {Config.SUPPORTED_MODELS[0]['hf_identifier']}")
         
         # Attempt to download the selected test model.
-        downloaded_path = manager.download_model(test_model_name)
+        # downloaded_path = manager.download_model(test_model_name)
+        logger.info(f"Attempting to download test model: {test_model_name} with progress callback")
+        downloaded_path = manager.download_model(test_model_name, progress_callback=print_progress)
         if downloaded_path and downloaded_path.exists():
             logger.info(f"Test model '{test_model_name}' available at: {downloaded_path}")
             logger.info(f"Contents of {downloaded_path} (first 5 items):")
@@ -285,7 +403,7 @@ if __name__ == '__main__':
             # Scenario 1: Ensure the model is available.
             # This should trigger download if not present, or validate if already cached.
             logger.info(f"Scenario 1: Ensuring '{test_model_name_for_ensure}' is available (first time or already valid).")
-            model_path = manager.ensure_model_available(test_model_name_for_ensure)
+            model_path = manager.ensure_model_available(test_model_name_for_ensure, progress_callback=print_progress)
             if model_path:
                 logger.info(f"Model '{test_model_name_for_ensure}' is available at {model_path}. Validation passed or model (re)downloaded.")
             else:
@@ -304,7 +422,7 @@ if __name__ == '__main__':
                         
                         logger.info(f"Calling ensure_model_available for the 'broken' model '{test_model_name_for_ensure}'.")
                         # This should detect the model is invalid and trigger a re-download.
-                        fixed_model_path = manager.ensure_model_available(test_model_name_for_ensure)
+                        fixed_model_path = manager.ensure_model_available(test_model_name_for_ensure, progress_callback=print_progress)
                         
                         if fixed_model_path and (fixed_model_path / "config.json").exists():
                             logger.info(f"Model '{test_model_name_for_ensure}' was successfully repaired/re-downloaded to {fixed_model_path}.")
@@ -333,5 +451,13 @@ if __name__ == '__main__':
                 logger.warning(f"Cannot simulate broken model for ensure_model_available: path {model_path} does not exist (model might not have been downloaded initially).")
         else:
             logger.warning("No models defined in Config.SUPPORTED_MODELS to test ensure_model_available with.")
+
+        # (At the end of the if __name__ == '__main__' block)
+        logger.info("\n--- Testing ensure_all_models_available ---")
+        all_models_ready = manager.ensure_all_models_available(progress_callback=print_progress)
+        if all_models_ready:
+            logger.info("All supported models successfully ensured.")
+        else:
+            logger.error("Failed to ensure all supported models.")
     else:
         logger.warning("No models defined in Config.SUPPORTED_MODELS to test with.")
