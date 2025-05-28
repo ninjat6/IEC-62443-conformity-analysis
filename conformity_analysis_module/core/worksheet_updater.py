@@ -7,15 +7,15 @@
 #  3. 將結果寫入 IEC 62443-2-4 Worksheet：
 #     • Conformity Statement
 #     • Conformity Evidence：主文件 + "==>" 引用文件 (避免重複/自引用)。
-#  4. 透過 Tkinter 讓使用者選擇輸出位置。
+#  4. 透過 PyQt6 讓使用者選擇輸出位置。
 # -----------------------------------------------------------------------------
 
 import json
 import re
 import shutil
-import tkinter as tk
-from pathlib import Path # Added
-from tkinter import filedialog
+import sys
+from pathlib import Path
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 import openpyxl
 from conformity_analysis_module.config import Config
@@ -212,16 +212,22 @@ class WorksheetUpdater:
             ws.cell(row=row, column=evi_col, value="\n\n".join(evidence_texts))
 
         # ------------------------------------------------------------------
-        # 儲存
+        # 儲存 - 使用 PyQt6 文件對話框
         # ------------------------------------------------------------------
-        root = tk.Tk()
-        root.withdraw()
-        save = filedialog.asksaveasfilename(
-            title="選擇儲存 Excel 檔案",
-            defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")],
-            initialfile="IEC62443_2_4d_filled.xlsx",
+        
+        # 確保 QApplication 實例存在
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
+        
+        # 使用 PyQt6 文件保存對話框
+        save, _ = QFileDialog.getSaveFileName(
+            None,  # 父窗口 (None = 獨立對話框)
+            "選擇儲存 Excel 檔案",  # 對話框標題
+            "IEC62443_2_4d_filled.xlsx",  # 預設檔名
+            "Excel Files (*.xlsx);;All Files (*)"  # 文件類型過濾器
         )
+        
         if not save:
             logger.warning("使用者取消存檔")
             return False, "使用者取消存檔"

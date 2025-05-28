@@ -1,26 +1,16 @@
 # IEC62443Tool.spec
+# 基於 requirements.txt 的實際依賴進行優化
 
 import sys
 sys.setrecursionlimit(5000) # Standard PyInstaller recursion limit increase
 
 # Project root directory 
-# Assumes this .spec file is in the project root, and main.py is also in the project root.
-# Modules like conformity_analysis_module, utils, etc., should be subdirectories here.
-project_root = '.' # Defines the root directory of the project.
+project_root = '.'
 
 a = Analysis(
-    ['main.py'], # Entry point of the application.
-    # `pathex`: A list of paths where PyInstaller will look for imported modules, similar to PYTHONPATH.
-    # Here, it's set to the project_root, allowing PyInstaller to find modules within the project.
+    ['main.py'],
     pathex=[project_root],
-    binaries=[], # List of non-Python libraries (e.g., .dll, .so) to include.
-    # `datas`: A list of tuples specifying non-binary files to be included in the bundle.
-    # Each tuple is (source_path, destination_in_bundle).
-    # - `source_path`: Path to the file or directory on the build system.
-    # - `destination_in_bundle`: Path to the directory where these files will be placed
-    #                            within the bundled application (relative to the bundle's root).
-    # Example: ('path/to/icon.png', 'assets') will copy icon.png into an 'assets' folder in the bundle.
-    # The paths here are relative to the `project_root`.
+    binaries=[], 
     datas=[
         # Bundling requirements JSON for the conformity analysis module.
         ('conformity_analysis_module/requirements_cn.json', 'conformity_analysis_module'),
@@ -34,98 +24,191 @@ a = Analysis(
         ('file_search_module/ui/icons/txt_icon.png', 'file_search_module/ui/icons'),
         ('file_search_module/ui/icons/xlsx_icon.png', 'file_search_module/ui/icons')
     ],
-    # `hiddenimports`: A list of modules that PyInstaller's static analysis might not detect,
-    # but are necessary for the application to run. This is common for plugins, dynamically
-    # imported modules, or modules imported via `__import__` or `importlib`.
-    # Including these explicitly ensures they are part of the bundle.
     hiddenimports=[
-        'PyQt6.sip',      # PyQt6 specific, often needed for core functionality.
-        'PyQt6.QtSvg',    # For SVG image support in PyQt.
-        'PyQt6.QtGui',    # Core GUI functionalities for PyQt.
-        'PyQt6.QtWidgets',# Widgets for PyQt.
-        'PyQt6.QtCore',   # Core non-GUI functionalities for PyQt.
-        'appdirs',        # Used by `path_utils.py` to determine user-specific data/cache directories.
-                          # Important for storing models and logs in standard locations.
-        'huggingface_hub', # Core library for interacting with Hugging Face Hub, used by ModelManager.
-        'huggingface_hub.utils', # Utilities for huggingface_hub.
-        'huggingface_hub.file_download', # Specifically for model downloading.
-        'sentence_transformers', # The main library for sentence embeddings.
-                                 # PyInstaller might miss some of its dynamically loaded components.
-        'transformers',   # Underlying library for sentence_transformers, handles model architectures.
-        'transformers.models', # Specific submodules of transformers.
-        'transformers.modeling_utils', # Often needed for model loading and utilities.
-        'torch',          # PyTorch, a core dependency for sentence_transformers and transformers.
-                          # PyInstaller needs to find all its components.
-        'torch.nn.modules.module', # Sometimes specific torch modules are missed.
-        # 'torchvision', # Example: Likely not needed for these types of models.
-        # 'torchaudio',  # Example: Likely not needed.
-        'sklearn.utils._typedefs', # Scikit-learn utilities, might be implicitly used.
-        'sklearn.utils._heap',     # For scikit-learn's PriorityQueue.
+        # PyQt6 GUI framework - 基於你的實際版本
+        'PyQt6.sip',
+        'PyQt6.QtSvg',
+        'PyQt6.QtGui',
+        'PyQt6.QtWidgets',
+        'PyQt6.QtCore',
+        'PyQt6.QtWebEngineWidgets',  # 基於 PyQt6-WebEngine
+        'PyQt6.QtWebEngineCore',
+        'PyQt6.QtPrintSupport',
+        
+        # Windows COM support (重要！用於 Word 文檔處理) - 基於 pywin32
+        'win32com.client',
+        'win32com.client.gencache',
+        'pythoncom',
+        'pywintypes',
+        'win32api',
+        'win32con',
+        'win32gui',
+        
+        # File encoding detection (重要！日誌顯示使用了)
+        'chardet',
+        'chardet.universaldetector',
+        
+        # Document processing - 基於你的實際依賴
+        'docx',               # python-docx 庫
+        'docx.document',
+        'docx.shared',
+        'PyPDF2',             # PDF processing
+        'PyPDF2.errors',
+        'lxml',               # XML processing
+        'lxml.etree',
+        
+        # Path and file utilities
+        'appdirs',
+        'pathlib',            # 雖然是標準庫，但明確包含
+        
+        # Machine Learning and NLP - 基於你的實際依賴
+        'huggingface_hub',
+        'huggingface_hub.utils',
+        'huggingface_hub.file_download',
+        'huggingface_hub.constants',
+        'sentence_transformers',
+        'sentence_transformers.util',
+        'sentence_transformers.models',
+        'transformers',
+        'transformers.models',
+        'transformers.modeling_utils',
+        'transformers.tokenization_utils',
+        'transformers.tokenization_utils_base',
+        'transformers.utils',
+        
+        # PyTorch - 版本 2.6.0
+        'torch',
+        'torch.nn.modules.module',
+        'torch._C',
+        'torch.cuda',
+        'torch.utils',
+        
+        # Tokenization - 版本 0.21.0
+        'tokenizers',
+        'tokenizers.implementations',
+        'tokenizers.models',
+        
+        # Model serialization - 版本 0.5.2
+        'safetensors',
+        'safetensors.torch',
+        
+        # Scientific computing - 基於你的版本
+        'numpy',              # 1.26.4
+        'scipy',              # 1.11.4
+        'scipy.spatial.distance',
+        
+        # Scikit-learn - 版本 1.4.2
+        'sklearn.utils._typedefs',
+        'sklearn.utils._heap',
         'sklearn.utils._sorting',
         'sklearn.utils._vector_sentinel',
-        'jsonschema',     # For JSON schema validation, potentially used by huggingface_hub or other libs.
-        'logging.handlers', # If using advanced logging handlers like RotatingFileHandler.
-        'openpyxl',       # For reading/writing Excel files (e.g., the worksheet).
-        'numpy',          # Core numerical library, dependency for many ML/data libraries.
-        'pandas',         # If pandas is used directly or indirectly for data manipulation.
-        'PIL.Image',      # Pillow library, if used for image handling (e.g., by PyQt for some icon formats).
-        # Ensure all necessary sub-modules for sentence_transformers are included:
-        'tokenizers',     # Used by transformers for text tokenization.
-        'safetensors',    # For loading models stored in the .safetensors format.
-        'packaging',      # Often a dependency of huggingface libs for version handling.
+        'sklearn.metrics.pairwise',
+        
+        # Excel/Office file processing - 基於 openpyxl 3.1.5
+        'openpyxl',
+        'openpyxl.styles',
+        'openpyxl.workbook',
+        'openpyxl.worksheet',
+        'openpyxl.utils',
+        'et_xmlfile',         # openpyxl 依賴
+        
+        # Image processing (for GUI icons) - 基於 Pillow 11.1.0
+        'PIL.Image',
+        'PIL.ImageQt',
+        'PIL._imaging',
+        
+        # Validation and serialization - 基於你的依賴
+        'yaml',               # PyYAML 6.0.2
+        'yaml.loader',
+        'yaml.dumper',
+        
+        # Networking and security - 基於你的版本
+        'certifi',            # 2025.1.31
+        'urllib3',            # 2.3.0
+        'requests',           # 2.32.3
+        'requests.adapters',
+        
+        # Utilities - 基於你的依賴
+        'packaging',          # 24.2
         'packaging.version',
         'packaging.specifiers',
-        'filelock',       # Used by huggingface_hub for managing concurrent access to cached files.
-        'certifi'         # Provides SSL certificates; crucial for HTTPS requests (e.g., model downloads).
-                          # Often needs to be explicitly included for bundled apps.
+        'filelock',           # 3.17.0
+        'tqdm',               # 4.67.1 - Progress bars
+        'joblib',             # 1.4.2
+        
+        # Regex processing - 版本 2024.11.6
+        'regex',
+        
+        # Template engine - Jinja2 3.1.5
+        'jinja2',
+        'jinja2.ext',
+        'markupsafe',         # MarkupSafe 3.0.2
+        
+        # Logging
+        'logging.handlers',
+        
+        # System utilities
+        'threading',
+        'concurrent.futures',
+        'multiprocessing',
+        
+        # tkinter 相關（用於文件對話框）
+        'tkinter',
+        'tkinter.filedialog',
+        'tkinter.messagebox',
+        'tkinter.constants',
+        'tkinter.commondialog',
     ],
-    hookspath=[], # Paths to custom PyInstaller hook files, if any.
+    hookspath=[], 
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # 排除不需要的大型庫以減小文件大小
+        'matplotlib',         # 沒在 requirements.txt 中，且不需要繪圖
+        'pytest',            # 測試框架
+        'IPython',           # Jupyter 相關
+        'jupyter',
+        'notebook',
+        # 注意: 保留 tkinter (用戶有使用) 和 unittest (sklearn 需要)
+        'doctest',           # 文檔測試可以排除
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=None,
     noarchive=False
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [], # This is for collected_files, kept empty for one-file bundle generally
+    [],                       # 空的！改為 onedir 模式
+    exclude_binaries=True,    # 關鍵！將二進制文件分離
     name='IEC62443Tool',
-    debug=False,
+    debug=False,              # 發布版本設為 False
     bootloader_ignore_signals=False,
-    strip=False, # Whether to strip symbols from the executable (can sometimes make debugging harder).
-    # `upx=True`: Enables UPX compression for the executable, making it smaller.
-    # Can sometimes cause issues with antivirus software or on specific systems.
-    # Set to `False` if the bundled application fails to start or behaves unexpectedly.
-    upx=True, 
-    upx_exclude=[], # List of files to exclude from UPX compression.
-    runtime_tmpdir=None, # Specifies a temporary directory for one-file executables. `None` lets PyInstaller manage it.
-    # `console=False`: Creates a windowed (GUI) application. No console window will appear when run.
-    # Set to `True` for debugging console output or if it's a command-line application.
-    console=False, 
-    disable_windowed_traceback=False, # If True, tracebacks in windowed mode are not shown in a dialog.
-    target_arch=None, # `None` means auto-detect architecture (e.g., x86_64). Can be set explicitly.
-    codesign_identity=None, # For macOS code signing.
-    entitlements_file=None, # For macOS entitlements.
-    # `icon`: Path to an application icon file (.ico on Windows, .icns on macOS).
-    # Example: icon='assets/app_icon.ico'
-    # Currently `None`, so a default system icon will be used.
-    icon=None 
+    strip=False,
+    upx=False,                # 建議先設為 False，避免防毒軟體誤報
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,            # GUI 應用程式
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None                 # 可以加入你的應用程式圖標
 )
 
-# For one-folder bundle, you might use a COLLECT step instead of or after EXE:
-# coll = COLLECT(exe,
-#                a.binaries,
-#                a.zipfiles,
-#                a.datas,
-#                strip=False,
-#                upx=True,
-#                upx_exclude=[],
-#                name='IEC62443Tool_folder')
+# 新增 COLLECT 階段 - 創建 onedir 輸出
+coll = COLLECT(
+    exe,
+    a.binaries,               # 將二進制文件放在 _internal 文件夾
+    a.zipfiles,               # 將 zip 文件分離
+    a.datas,                  # 將數據文件分離
+    strip=False,
+    upx=False,                # 同樣建議關閉 UPX 壓縮
+    upx_exclude=[],
+    name='IEC62443Tool'       # 最終文件夾名稱
+)
