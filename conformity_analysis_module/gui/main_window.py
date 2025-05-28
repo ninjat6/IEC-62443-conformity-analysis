@@ -40,10 +40,10 @@ class AnalysisThread(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, analyzer, folder_path, requirements, threshold=0.65):
+    def __init__(self, analyzer, folder_path: Path, requirements, threshold=0.65): # Changed from str to Path
         super().__init__()
         self.analyzer = analyzer
-        self.folder_path = folder_path
+        self.folder_path = folder_path # folder_path is now received as Path
         self.requirements = requirements
         self.threshold = threshold
 
@@ -1281,7 +1281,7 @@ class ConformityAnalysisWindow(QMainWindow):
         # 啟動分析執行緒
         self.analysis_thread = AnalysisThread(
             self.analyzer, 
-            str(self.folder_path), # Analyzer expects a string path it converts to Path
+            self.folder_path, # self.folder_path is already a Path object
             selected_requirements_data,
             self.threshold_value
         )

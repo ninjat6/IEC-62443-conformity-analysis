@@ -9,9 +9,10 @@ from conformity_analysis_module.core.file_processor import FileProcessor
 from conformity_analysis_module.utils.logger import logger
 from conformity_analysis_module.config import Config
 from .model_manager import ModelManager
+from typing import List, Dict, Union # Add Union for potential future use, List and Dict for clarity
 
 class Analyzer:
-    def __init__(self, model_identifier='all-MiniLM-L12-v2'):
+    def __init__(self, model_identifier: str = 'all-MiniLM-L12-v2') -> None:
         """
         Initializes the Analyzer with a specified sentence-transformer model.
 
@@ -38,8 +39,8 @@ class Analyzer:
                           and should be handled by the calling code (e.g., by informing the
                           user that analysis cannot proceed).
         """
-        self.model_manager = ModelManager() # Instantiate the manager responsible for model fetching and validation.
-        logger.debug(f"Using NumPy version: {numpy.__version__}, scikit-learn version: {sklearn.__version__}") # New line
+        self.model_manager = ModelManager()  # Instantiate the manager responsible for model fetching and validation.
+        logger.debug(f"Using NumPy version: {numpy.__version__}, scikit-learn version: {sklearn.__version__}")  # New line
         
         # The `model_identifier` parameter is expected to be one of the short names
         # (e.g., "all-MiniLM-L12-v2") defined in `Config.SUPPORTED_MODELS`.
@@ -72,11 +73,27 @@ class Analyzer:
             logger.critical(f"CRITICAL: Model '{model_identifier}' could not be made available by ModelManager. Analyzer cannot function.")
             # Similar to the above, this RuntimeError must be handled by the caller.
             raise RuntimeError(f"Model '{model_identifier}' not available. Check logs for details (e.g., network issues, disk space, unsupported model).")
-        
-    def analyze(self, folder_path: str, requirements: dict, threshold: float = 0.65):
-        base_path = Path(folder_path)
-        results = []
-        requirement_embeddings = {}
+
+    def analyze(self, folder_path: Path, requirements: Dict[str, str], threshold: float = 0.65) -> List[Dict[str, Union[str, float]]]:
+        """
+        Analyzes documents within a specified folder against a set of requirements.
+
+        Args:
+            folder_path (Path): The path to the folder containing documents to analyze.
+            requirements (Dict[str, str]): A dictionary where keys are requirement IDs and
+                                           values are the textual descriptions of the requirements.
+            threshold (float): The similarity threshold for considering a snippet as matching a requirement.
+                               Defaults to 0.65.
+
+        Returns:
+            List[Dict[str, Union[str, float]]]: A list of dictionaries, where each dictionary
+                                                represents a match found. Each match includes
+                                                the requirement ID, requirement text, matched snippet,
+                                                similarity score, and source file.
+        """
+        base_path = folder_path # folder_path is now Path
+        results: List[Dict[str, Union[str, float]]] = []
+        requirement_embeddings: Dict[str, any] = {} # Assuming model.encode returns something specific, 'any' for now
         
         # 首先檢測資料夾結構
         self._detect_sp_folders(base_path)
@@ -122,13 +139,13 @@ class Analyzer:
         # 保存結果到JSON - 確保所有結果都是可序列化的
         with Config.ANALYSIS_OUTPUT.open('w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=4)
-        
+
         logger.info(f"分析完成，共找到 {len(results)} 筆符合結果")
         return results
-    
-    def _detect_sp_folders(self, base_path: Path):
+
+    def _detect_sp_folders(self, base_path: Path) -> None:
         """偵測資料夾中是否有SP.XX格式的子資料夾"""
-        self.sp_folders = {}
+        self.sp_folders: Dict[str, str] = {}
         sp_pattern = re.compile(r'^SP\.(\d{2})$', re.IGNORECASE)
         
         # 列出主資料夾下的所有項目
@@ -144,10 +161,10 @@ class Analyzer:
         except Exception as e:
             logger.error(f"偵測SP資料夾時發生錯誤: {e}")
     
-    def _group_requirements_by_sp(self, requirements: dict) -> dict:
+    def _group_requirements_by_sp(self, requirements: Dict[str, str]) -> Dict[str, List[str]]:
         """將條款依SP分組"""
-        requirements_by_sp = {}
-        
+        requirements_by_sp: Dict[str, List[str]] = {}
+
         for req_key in requirements.keys():
             # 提取SP部分 (例如 SP.01.01BR -> SP.01)
             match = re.match(r'(SP\.\d{2})', req_key)
@@ -158,11 +175,11 @@ class Analyzer:
                 requirements_by_sp[sp_group].append(req_key)
         
         return requirements_by_sp
-    
-    def _process_folder_for_sp(self, folder_path: Path, requirement_keys: list, req_embeddings: dict, req_texts: dict, threshold: float):
+
+    def _process_folder_for_sp(self, folder_path: Path, requirement_keys: List[str], req_embeddings: Dict[str, any], req_texts: Dict[str, str], threshold: float) -> List[Dict[str, Union[str, float]]]:
         """處理特定SP資料夾的文件"""
-        results = []
-        
+        results: List[Dict[str, Union[str, float]]] = []
+
         # 遍歷資料夾中的所有檔案
         for file_path in folder_path.rglob('*'):
             if file_path.is_file():
@@ -171,7 +188,7 @@ class Analyzer:
                     continue
                 
                 logger.info(f"處理檔案: {str(file_path)}")
-                snippets = FileProcessor.extract_text_snippets(str(file_path))
+                snippets = FileProcessor.extract_text_snippets(file_path)
                 if not snippets:
                     continue
                 
@@ -205,11 +222,11 @@ class Analyzer:
                             })
         
         return results
-    
-    def _process_folder_without_sp(self, base_path: Path, requirements: dict, req_embeddings: dict, threshold: float):
+
+    def _process_folder_without_sp(self, base_path: Path, requirements: Dict[str, str], req_embeddings: Dict[str, any], threshold: float) -> List[Dict[str, Union[str, float]]]:
         """當沒有找到對應SP資料夾時，從主資料夾處理"""
-        results = []
-        
+        results: List[Dict[str, Union[str, float]]] = []
+
         processed_sp_folder_names = set(self.sp_folders.values())
 
         for file_path in base_path.rglob('*'):
@@ -234,7 +251,7 @@ class Analyzer:
                 continue
             
             logger.info(f"處理檔案 (主資料夾): {str(file_path)}")
-            snippets = FileProcessor.extract_text_snippets(str(file_path))
+            snippets = FileProcessor.extract_text_snippets(file_path)
             if not snippets:
                 continue
             
