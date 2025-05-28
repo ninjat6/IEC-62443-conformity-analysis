@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPixmap, QPainter, QBrus
 from PyQt6.QtWidgets import QStyle
 from pathlib import Path
 
+from conformity_analysis_module.config import Config # Added import
 from conformity_analysis_module.core.analyzer import Analyzer
 from conformity_analysis_module.core.worksheet_updater import WorksheetUpdater
 from conformity_analysis_module.core.requirements_loader import RequirementsLoader
