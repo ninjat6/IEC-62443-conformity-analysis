@@ -1,3 +1,4 @@
+appdirs>=1.4.4
 altgraph==0.17.4
 appdirs>=1.4.4
 certifi==2025.1.31
@@ -21,12 +22,12 @@ packaging==24.2
 pefile==2023.2.7
 pillow==11.1.0
 pyinstaller==6.13.0
-pyinstaller-hooks-contrib==2025.1
+pyinstaller-hooks-contrib==2025.2
 PyPDF2==3.0.1
-PyQt6==6.8.2
-PyQt6-Qt6==6.8.2
-PyQt6-WebEngine==6.8.2
-PyQt6-WebEngine-Qt6==6.8.2
+PyQt6==6.9.0
+PyQt6-Qt6==6.9.0
+PyQt6-WebEngine==6.9.0
+PyQt6-WebEngine-Qt6==6.9.0
 PyQt6_sip==13.10.0
 python-docx==1.1.2
 PyYAML==6.0.2
@@ -46,3 +47,5 @@ transformers==4.49.0
 typing_extensions==4.12.2
 urllib3==2.3.0
 wheel==0.45.1
+pywin32==308
+pywin32-ctypes==0.2.3
