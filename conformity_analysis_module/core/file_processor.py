@@ -1,13 +1,13 @@
 # core/file_processor.py
-import os
+from pathlib import Path
 import docx
 import openpyxl
-import PyPDF2
+import PyPDF2 # pdfplumber was mentioned in thought process but PyPDF2 is used in code
 from conformity_analysis_module.utils.logger import logger
 
 class FileProcessor:
     @staticmethod
-    def extract_text_from_docx(file_path):
+    def extract_text_from_docx(file_path: Path):
         snippets = []
         try:
             doc = docx.Document(file_path)
@@ -16,11 +16,11 @@ class FileProcessor:
                 if text:
                     snippets.append(text)
         except Exception as e:
-            logger.error(f"處理 DOCX 檔案 {file_path} 時發生錯誤: {e}")
+            logger.error(f"處理 DOCX 檔案 {str(file_path)} 時發生錯誤: {e}")
         return snippets
 
     @staticmethod
-    def extract_text_from_xlsx(file_path):
+    def extract_text_from_xlsx(file_path: Path):
         snippets = []
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
@@ -30,14 +30,14 @@ class FileProcessor:
                     if row_text:
                         snippets.append(row_text)
         except Exception as e:
-            logger.error(f"處理 XLSX 檔案 {file_path} 時發生錯誤: {e}")
+            logger.error(f"處理 XLSX 檔案 {str(file_path)} 時發生錯誤: {e}")
         return snippets
 
     @staticmethod
-    def extract_text_from_pdf(file_path):
+    def extract_text_from_pdf(file_path: Path):
         snippets = []
         try:
-            with open(file_path, "rb") as f:
+            with open(file_path, "rb") as f: # open() works with Path objects
                 reader = PyPDF2.PdfReader(f)
                 for page in reader.pages:
                     text = page.extract_text()
@@ -47,12 +47,17 @@ class FileProcessor:
                             if line:
                                 snippets.append(line)
         except Exception as e:
-            logger.error(f"處理 PDF 檔案 {file_path} 時發生錯誤: {e}")
+            logger.error(f"處理 PDF 檔案 {str(file_path)} 時發生錯誤: {e}")
         return snippets
 
     @staticmethod
-    def extract_text_snippets(file_path):
-        ext = file_path.lower().split('.')[-1]
+    def extract_text_snippets(file_path: Path):
+        # Path.suffix includes the dot, e.g., ".docx"
+        # We need to remove the dot for comparison.
+        ext = file_path.suffix.lower()
+        if ext: # Ensure suffix is not empty
+            ext = ext[1:]
+
         if ext == 'docx':
             return FileProcessor.extract_text_from_docx(file_path)
         elif ext == 'xlsx':
@@ -60,4 +65,5 @@ class FileProcessor:
         elif ext == 'pdf':
             return FileProcessor.extract_text_from_pdf(file_path)
         else:
+            logger.warning(f"不支援的檔案類型: {str(file_path)} (副檔名: {ext})")
             return []

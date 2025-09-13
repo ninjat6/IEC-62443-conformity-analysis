@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPixmap, QPainter, QBrush, QScreen
 from PyQt6.QtWidgets import QStyle
+from pathlib import Path
 
 from conformity_analysis_module.core.analyzer import Analyzer
 from conformity_analysis_module.core.worksheet_updater import WorksheetUpdater
@@ -145,6 +146,12 @@ class ConformityAnalysisWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to load requirements: {e}", exc_info=True)
             self.requirements = {}
+            # Add this QMessageBox
+            QMessageBox.warning(
+                self, 
+                "載入錯誤", 
+                f"無法載入需求文件。\n請檢查 'requirements.json' 是否存在且格式正確。\n\n錯誤詳情: {e}"
+            )
             
         self.chapter_names = {
             "SP.01": "人員配備", "SP.02": "保障措施", "SP.03": "架構設計",
@@ -543,8 +550,8 @@ class ConformityAnalysisWindow(QMainWindow):
         
         # 模型選擇下拉框
         self.model_combo = QComboBox()
-        self.model_combo.addItem("🔤 all-MiniLM-L12-v2 (預設英文模型)", "models/all-MiniLM-L12-v2")
-        self.model_combo.addItem("🌐 paraphrase-multilingual-MiniLM-L12-v2 (增強中文支援)", "models/paraphrase-multilingual-MiniLM-L12-v2")
+        self.model_combo.addItem("🔤 all-MiniLM-L12-v2 (預設英文模型)", "all-MiniLM-L12-v2")
+        self.model_combo.addItem("🌐 paraphrase-multilingual-MiniLM-L12-v2 (增強中文支援)", "paraphrase-multilingual-MiniLM-L12-v2")
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         layout.addWidget(self.model_combo)
         
@@ -1146,17 +1153,18 @@ class ConformityAnalysisWindow(QMainWindow):
 
     def select_folder(self):
         """選擇分析資料夾"""
-        folder = QFileDialog.getExistingDirectory(
+        initial_path = str(self.folder_path) if self.folder_path else ""
+        folder_str = QFileDialog.getExistingDirectory(
             self, 
             "選擇要分析的資料夾", 
-            self.folder_path or ""
+            initial_path
         )
-        if folder:
-            self.folder_path = folder
-            self.folder_path_edit.setText(folder)
+        if folder_str:
+            self.folder_path = Path(folder_str)
+            self.folder_path_edit.setText(str(self.folder_path))
             self.update_analyze_button_state()
-            self.status_bar.showMessage(f"📁 已選擇資料夾: {folder}")
-            logger.info(f"Folder selected: {folder}")
+            self.status_bar.showMessage(f"📁 已選擇資料夾: {str(self.folder_path)}")
+            logger.info(f"Folder selected: {str(self.folder_path)}")
 
     def on_model_changed(self, index):
         """模型選擇變化"""
@@ -1256,11 +1264,11 @@ class ConformityAnalysisWindow(QMainWindow):
             return
 
         # 開始分析
-        selected_model = self.model_combo.currentData()
+        selected_model_identifier = self.model_combo.currentData()
         threshold_info = f"相似度閾值: {int(self.threshold_value * 100)}%"
-        logger.info(f"Starting analysis with model: {selected_model}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
+        logger.info(f"Starting analysis with model: {selected_model_identifier}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
         
-        self.analyzer = Analyzer(model_name=selected_model)
+        self.analyzer = Analyzer(model_identifier=selected_model_identifier)
         self.analyze_btn.setEnabled(False)
         self.fill_worksheet_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -1273,7 +1281,7 @@ class ConformityAnalysisWindow(QMainWindow):
         # 啟動分析執行緒
         self.analysis_thread = AnalysisThread(
             self.analyzer, 
-            self.folder_path, 
+            str(self.folder_path), # Analyzer expects a string path it converts to Path
             selected_requirements_data,
             self.threshold_value
         )
@@ -1329,7 +1337,7 @@ class ConformityAnalysisWindow(QMainWindow):
         
         # 更新狀態欄
         if results:
-            self.status_bar.showMessage(f"✅ 分析完成 - 找到 {len(results)} 筆結果", 8000)
+            self.status_bar.showMessage(f"✅ 分析完成 - 找到 {len(results)} 筆結果. 結果保存在 {str(Config.ANALYSIS_OUTPUT)}", 8000)
         else:
             self.status_bar.showMessage(f"ℹ️ 分析完成 - 未找到符合結果，建議調整條件", 8000)
 
@@ -1406,7 +1414,8 @@ class ConformityAnalysisWindow(QMainWindow):
                 
                 # 文件名處理
                 if source_file != 'N/A':
-                    file_name = source_file.split('/')[-1] if '/' in source_file else source_file.split('\\')[-1]
+                    # source_file is already a string from Analyzer results, which itself ensures it's a string
+                    file_name = Path(source_file).name
                 else:
                     file_name = 'N/A'
                 
@@ -1503,16 +1512,22 @@ class ConformityAnalysisWindow(QMainWindow):
         self.status_bar.showMessage("📝 正在填入 Worksheet...")
 
         try:
-            success, message = WorksheetUpdater.update_worksheet()
+            # Assuming WorksheetUpdater is updated to use Config.ANALYSIS_OUTPUT and Config.WORKSHEET_FILE directly
+            # or that it will be refactored to accept Path objects if needed.
+            # The current call in the provided code is WorksheetUpdater.update_worksheet()
+            # If it were to take paths:
+            # success, message = WorksheetUpdater.update_worksheet(Config.ANALYSIS_OUTPUT, Config.WORKSHEET_FILE)
+            # For now, sticking to the existing call signature from the provided code.
+            success, message = WorksheetUpdater.update_worksheet(Config.ANALYSIS_OUTPUT)
             if success:
-                QMessageBox.information(self, "✅ 成功", f"📝 {message}")
-                self.status_bar.showMessage("✅ Worksheet 填入完成", 8000)
+                QMessageBox.information(self, "✅ 成功", f"📝 {message}\nWorksheet 已更新: {str(Config.WORKSHEET_FILE)}")
+                self.status_bar.showMessage(f"✅ Worksheet 填入完成: {str(Config.WORKSHEET_FILE)}", 8000)
             else:
                 QMessageBox.warning(self, "⚠️ 失敗", f"📝 {message}")
                 self.status_bar.showMessage("⚠️ Worksheet 填入失敗", 8000)
         except Exception as e:
             logger.error(f"Error filling worksheet: {e}", exc_info=True)
-            QMessageBox.critical(self, "❌ 錯誤", f"填入 Worksheet 時發生錯誤:\n\n{e}")
+            QMessageBox.critical(self, "❌ 錯誤", f"填入 Worksheet 時發生錯誤:\n\n{e}\nWorksheet路徑: {str(Config.WORKSHEET_FILE)}")
             self.status_bar.showMessage("❌ Worksheet 填入時發生錯誤", 8000)
         finally:
             self.fill_worksheet_btn.setEnabled(True)

@@ -1,28 +1,43 @@
-import os
 import re
 import sys
 import chardet
+from pathlib import Path # Added
 from PyQt6.QtCore import QUrl, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QMessageBox
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 
 class HtmlViewer(QWidget):
-    def __init__(self, html_file: str, search_keyword: str = ""):
+    def __init__(self, html_file: Path | str, search_keyword: str = ""): # html_file can be Path or str
         super().__init__()
+        
+        html_file_obj = Path(html_file).resolve() # Ensure it's an absolute Path object
+        
         self.search_keyword = search_keyword
         self.setWindowTitle("HTML Viewer - iOS 風格搜尋與懸浮效果")
         self.setGeometry(100, 100, 900, 700)
         layout = QVBoxLayout()
         self.web_view = QWebEngineView()
         
-        if not os.path.isfile(html_file):
-            QMessageBox.critical(self, "錯誤", f"文件未找到: {html_file}")
-            sys.exit(1)
+        if not html_file_obj.is_file(): # Use Path.is_file()
+            QMessageBox.critical(self, "錯誤", f"文件未找到: {str(html_file_obj)}")
+            # Consider not exiting the whole app if viewer fails for one file,
+            # but for now, keeping sys.exit as per original logic if file not found is critical.
+            # A better approach might be to show an error in the web_view itself or disable the widget.
+            # For this refactor, focusing on path handling.
+            # If sys.exit is problematic, this should be handled by the caller or a more robust error display.
+            # For now, if sys.exit is problematic, we can raise an exception or return early.
+            # Let's assume caller handles if this widget can't init.
+            # For robustness, we'll avoid sys.exit here.
+            self.web_view.setHtml(f"<h1>Error: File not found</h1><p>{str(html_file_obj)}</p>")
+            layout.addWidget(self.web_view) # Add web_view to show error
+            self.setLayout(layout)
+            return # Exit init early
         
-        modified_html = self.modify_html(html_file)
-        base_url = QUrl.fromLocalFile(os.path.abspath(html_file))
-        self.web_view.setHtml(modified_html, base_url)
+        modified_html_content = self.modify_html(html_file_obj) # Pass Path object
+        # QUrl.fromLocalFile expects a string path.
+        base_url = QUrl.fromLocalFile(str(html_file_obj)) # Use resolved path string
+        self.web_view.setHtml(modified_html_content, base_url)
         
         self.search_bar = QLineEdit(self)
         self.search_bar.setPlaceholderText("🔍 在頁面中搜尋")
@@ -72,9 +87,13 @@ class HtmlViewer(QWidget):
             options |= QWebEnginePage.FindFlag.FindBackward
         self.web_view.page().findText(keyword, options)
     
-    def modify_html(self, html_file):
-        with open(html_file, "rb") as file:
+    def modify_html(self, html_file_obj: Path) -> str: # Accepts Path object
+        # Open with Path object
+        with open(html_file_obj, "rb") as file:
             raw_data = file.read()
+        
+        # Try to find charset in <meta> tag
+        # Ensure regex search is on bytes if raw_data is bytes
         m = re.search(rb'<meta[^>]*charset=["\']?([^>"\']+)', raw_data, re.IGNORECASE)
         if m:
             encoding = m.group(1).decode('ascii', errors='ignore').strip().lower()
