@@ -7,15 +7,15 @@
 #  3. 將結果寫入 IEC 62443-2-4 Worksheet：
 #     • Conformity Statement
 #     • Conformity Evidence：主文件 + "==>" 引用文件 (避免重複/自引用)。
-#  4. 透過 Tkinter 讓使用者選擇輸出位置。
+#  4. 透過 PyQt6 讓使用者選擇輸出位置。
 # -----------------------------------------------------------------------------
 
 import json
-import os
 import re
 import shutil
-import tkinter as tk
-from tkinter import filedialog
+import sys
+from pathlib import Path
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 import openpyxl
 from conformity_analysis_module.config import Config
@@ -34,13 +34,13 @@ class WorksheetUpdater:
         # ------------------------------------------------------------------
         # 基本檔案檢查
         # ------------------------------------------------------------------
-        analysis_file = Config.ANALYSIS_OUTPUT
-        template_file = Config.WORKSHEET_FILE
-        logger.info("analysis_results.json 路徑: %s", analysis_file)
+        analysis_file = Config.ANALYSIS_OUTPUT # Already a Path object from config refactor
+        template_file = Config.WORKSHEET_FILE # Already a Path object from config refactor
+        logger.info("analysis_results.json 路徑: %s", str(analysis_file))
 
-        if not os.path.exists(analysis_file):
+        if not analysis_file.exists(): # Use Path.exists()
             return False, "analysis_results.json 不存在，請先執行分析"
-        if not os.path.exists(template_file):
+        if not template_file.exists(): # Use Path.exists()
             return False, "找不到模板檔案 IEC62443_2_4d_2024-worksheet.xlsx"
 
         # ------------------------------------------------------------------
@@ -78,10 +78,10 @@ class WorksheetUpdater:
                     continue
                 ref_code = m.group(1)
                 base_code = re.sub(r"([A-Z]+-\d+-\d+)[A-Za-z]?", r"\1", ref_code)
-                for sf in all_source_files:
-                    stem = os.path.splitext(os.path.basename(sf))[0]
+                for sf_str in all_source_files: # sf_str is a string path
+                    stem = Path(sf_str).stem # Use Path.stem
                     if ref_code in stem or base_code in stem:
-                        refs.append(sf)
+                        refs.append(sf_str)
                         break
             res["referenced_files"] = refs
 
@@ -96,12 +96,16 @@ class WorksheetUpdater:
         # ------------------------------------------------------------------
         # 複製模板
         # ------------------------------------------------------------------
-        tmp_dir = os.path.join(Config.ROOT_DIR, "temp")
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_file = os.path.join(tmp_dir, "IEC62443_2_4d_filled.xlsx")
-        shutil.copy(template_file, tmp_file)
+        # Config.ROOT_DIR is already a Path object
+        tmp_dir = Config.ROOT_DIR / "temp" 
+        tmp_dir.mkdir(parents=True, exist_ok=True) # Use Path.mkdir
+        tmp_file_path = tmp_dir / "IEC62443_2_4d_filled.xlsx" # Use / operator
+        
+        # shutil.copy works with Path objects
+        shutil.copy(template_file, tmp_file_path) 
 
-        wb = openpyxl.load_workbook(tmp_file)
+        # openpyxl.load_workbook works with Path objects
+        wb = openpyxl.load_workbook(tmp_file_path) 
         ws = wb.active
 
         header = {
@@ -134,14 +138,16 @@ class WorksheetUpdater:
             # ---------- Conformity Statement ----------
             stmt_cells: list[str] = []
             for ent in entries:
-                src_name = os.path.basename(ent["source_file"])
+                source_file_path_obj = Path(ent["source_file"]) # ent["source_file"] is a string path
+                src_name = source_file_path_obj.name # Use Path.name
                 snippet = ent["snippet"]
                 score = ent.get("keyword_score", 0)
                 kw = ", ".join(ent.get("matched_keywords", []))
                 section_no = ""
-                if src_name.lower().endswith(".docx"):
+                if src_name.lower().endswith(".docx"): # src_name is already just the name string
                     try:
-                        section_no = DocxSectionExtractor(ent["source_file"]).get_section_number(snippet)
+                        # DocxSectionExtractor expects a string path
+                        section_no = DocxSectionExtractor(str(source_file_path_obj)).extract_sections(snippet)
                     except Exception:
                         section_no = "(無編號)"
                 stmt_cells.append(
@@ -157,64 +163,71 @@ class WorksheetUpdater:
 
             # 第一遍：收集所有主文件及其引用關係
             for ent in entries:
-                src_base = os.path.basename(ent["source_file"])
-                src_name = os.path.splitext(src_base)[0]
+                source_file_path_obj = Path(ent["source_file"]) # ent["source_file"] is a string path
+                src_name_stem = source_file_path_obj.stem # Use Path.stem for name without extension
+                src_name_with_ext = source_file_path_obj.name # Use Path.name for full filename
                 
                 # 初始化這個文件的引用集合
-                if src_name not in doc_with_refs:
-                    doc_with_refs[src_name] = set()
+                if src_name_stem not in doc_with_refs:
+                    doc_with_refs[src_name_stem] = set()
                 
                 # 添加所有引用
-                for rf in ent["referenced_files"]:
-                    rf_base = os.path.basename(rf)
-                    rf_name = os.path.splitext(rf_base)[0]
+                for rf_str in ent["referenced_files"]: # rf_str is a string path
+                    ref_file_path_obj = Path(rf_str)
+                    rf_name_stem = ref_file_path_obj.stem
                     
                     # 不添加自引用
-                    if src_base != rf_base:
-                        doc_with_refs[src_name].add(rf_name)
-                        all_ref_docs.add(rf_name)  # 標記為被引用文檔
+                    if src_name_with_ext != ref_file_path_obj.name:
+                        doc_with_refs[src_name_stem].add(rf_name_stem)
+                        all_ref_docs.add(rf_name_stem)  # 標記為被引用文檔
 
             # 第二遍：構建結果文本
             # 先處理有snippet的主文件
             for ent in entries:
-                src_base = os.path.basename(ent["source_file"])
-                src_name = os.path.splitext(src_base)[0]
+                source_file_path_obj = Path(ent["source_file"])
+                src_name_stem = source_file_path_obj.stem
                 
                 # 如果這個主文件已經處理過，跳過
-                if src_name in handled_main_docs:
+                if src_name_stem in handled_main_docs:
                     continue
                 
                 # 添加主文件及其引用
-                text = src_name
-                if src_name in doc_with_refs:
-                    for ref_name in sorted(doc_with_refs[src_name]):
-                        text += f"\n==> {ref_name}"
+                text = src_name_stem
+                if src_name_stem in doc_with_refs:
+                    for ref_name_stem_sorted in sorted(doc_with_refs[src_name_stem]):
+                        text += f"\n==> {ref_name_stem_sorted}"
                 
                 evidence_texts.append(text)
-                handled_main_docs.add(src_name)
+                handled_main_docs.add(src_name_stem)
 
             # 只添加那些有自己snippet但沒有被處理過的文檔
             for ent in entries:
-                src_base = os.path.basename(ent["source_file"])
-                src_name = os.path.splitext(src_base)[0]
+                source_file_path_obj = Path(ent["source_file"])
+                src_name_stem = source_file_path_obj.stem
                 
-                if src_name not in handled_main_docs:
-                    evidence_texts.append(src_name)
-                    handled_main_docs.add(src_name)
+                if src_name_stem not in handled_main_docs:
+                    evidence_texts.append(src_name_stem)
+                    handled_main_docs.add(src_name_stem)
 
             ws.cell(row=row, column=evi_col, value="\n\n".join(evidence_texts))
 
         # ------------------------------------------------------------------
-        # 儲存
+        # 儲存 - 使用 PyQt6 文件對話框
         # ------------------------------------------------------------------
-        root = tk.Tk()
-        root.withdraw()
-        save = filedialog.asksaveasfilename(
-            title="選擇儲存 Excel 檔案",
-            defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")],
-            initialfile="IEC62443_2_4d_filled.xlsx",
+        
+        # 確保 QApplication 實例存在
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
+        
+        # 使用 PyQt6 文件保存對話框
+        save, _ = QFileDialog.getSaveFileName(
+            None,  # 父窗口 (None = 獨立對話框)
+            "選擇儲存 Excel 檔案",  # 對話框標題
+            "IEC62443_2_4d_filled.xlsx",  # 預設檔名
+            "Excel Files (*.xlsx);;All Files (*)"  # 文件類型過濾器
         )
+        
         if not save:
             logger.warning("使用者取消存檔")
             return False, "使用者取消存檔"

@@ -1,4 +1,7 @@
 # gui/__init__.py
-from .main_window import ConformityAnalysisWindow
+# This file can be empty or export names from this package.
 
-__all__ = ['ConformityAnalysisWindow']
+from .main_window import ConformityAnalysisWindow
+from .progress_dialog import ModelDownloadProgressDialog # Add this line
+
+__all__ = ['ConformityAnalysisWindow', 'ModelDownloadProgressDialog']

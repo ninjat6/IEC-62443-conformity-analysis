@@ -11,6 +11,7 @@ dist/
 build/
 
 # 虛擬環境
+packaging_env/
 venv/
 env/
 ENV/

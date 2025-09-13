@@ -1,12 +1,13 @@
 # utils/file_processor.py
 
-from docx import Document
-from openpyxl import load_workbook
+from docx import Document # type: ignore
+from openpyxl import load_workbook # type: ignore
 import json
-import os
 import re
 import subprocess
 import tempfile
+from pathlib import Path
+import shutil # For copying files
 
 class FileProcessor:
     """處理檔案並分割中英文內容的工具類"""
@@ -112,7 +113,7 @@ class FileProcessor:
         return line
 
     @staticmethod
-    def split_text_advanced(text: str):
+    def _split_text_advanced(text: str): # Made private as it's a helper
         """
         將整份文本逐行分割，分別產生「中文清單」與「英文清單」。
         """
@@ -149,43 +150,37 @@ class FileProcessor:
         return chinese_content, english_content
 
     @staticmethod
-    def split_docx_to_json(input_path, output_chinese_path, output_english_path):
+    def _split_docx_to_json(input_path_obj: Path, output_chinese_path_obj: Path, output_english_path_obj: Path):
         """處理 Word 文件 (.docx) -> 生成中英文 JSON"""
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"找不到輸入檔案：{input_path}")
-
+        # Existence check done by caller (process_file)
         try:
-            doc = Document(input_path)
-            # 收集所有段落文字並以換行符連成大字串
+            doc = Document(input_path_obj) # docx.Document accepts Path objects
             text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
 
-            chinese_content, english_content = FileProcessor.split_text_advanced(text)
+            chinese_content, english_content = FileProcessor._split_text_advanced(text)
 
-            os.makedirs(os.path.dirname(output_chinese_path), exist_ok=True)
-            os.makedirs(os.path.dirname(output_english_path), exist_ok=True)
+            output_chinese_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            output_english_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(output_chinese_path, 'w', encoding='utf-8') as ch_file:
+            with open(output_chinese_path_obj, 'w', encoding='utf-8') as ch_file:
                 json.dump(chinese_content, ch_file, ensure_ascii=False, indent=4)
 
-            with open(output_english_path, 'w', encoding='utf-8') as en_file:
+            with open(output_english_path_obj, 'w', encoding='utf-8') as en_file:
                 json.dump(english_content, en_file, ensure_ascii=False, indent=4)
 
             return {
-                "chinese_json": output_chinese_path,
-                "english_json": output_english_path
+                "chinese_json": str(output_chinese_path_obj), # Return strings for external compatibility
+                "english_json": str(output_english_path_obj)
             }
-
         except Exception as e:
-            raise Exception(f"處理 DOCX 檔案時發生錯誤：{str(e)}")
+            raise Exception(f"處理 DOCX 檔案 {str(input_path_obj)} 時發生錯誤：{str(e)}")
 
     @staticmethod
-    def split_xlsx_to_json(input_path, output_chinese_path, output_english_path):
+    def _split_xlsx_to_json(input_path_obj: Path, output_chinese_path_obj: Path, output_english_path_obj: Path):
         """處理 Excel 文件 -> 生成中英文 JSON"""
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"找不到輸入檔案：{input_path}")
-
+        # Existence check done by caller (process_file)
         try:
-            workbook = load_workbook(input_path)
+            workbook = load_workbook(input_path_obj) # load_workbook accepts Path objects
             sheet = workbook.active
 
             text_lines = []
@@ -195,92 +190,125 @@ class FileProcessor:
                     text_lines.append(line_str)
 
             text = "\n".join(text_lines)
-            chinese_content, english_content = FileProcessor.split_text_advanced(text)
+            chinese_content, english_content = FileProcessor._split_text_advanced(text)
 
-            os.makedirs(os.path.dirname(output_chinese_path), exist_ok=True)
-            os.makedirs(os.path.dirname(output_english_path), exist_ok=True)
+            output_chinese_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            output_english_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(output_chinese_path, 'w', encoding='utf-8') as ch_file:
+            with open(output_chinese_path_obj, 'w', encoding='utf-8') as ch_file:
                 json.dump(chinese_content, ch_file, ensure_ascii=False, indent=4)
 
-            with open(output_english_path, 'w', encoding='utf-8') as en_file:
+            with open(output_english_path_obj, 'w', encoding='utf-8') as en_file:
                 json.dump(english_content, en_file, ensure_ascii=False, indent=4)
 
             return {
-                "chinese_json": output_chinese_path,
-                "english_json": output_english_path
+                "chinese_json": str(output_chinese_path_obj), # Return strings
+                "english_json": str(output_english_path_obj)
             }
-
         except Exception as e:
-            raise Exception(f"處理 XLSX 檔案時發生錯誤：{str(e)}")
+            raise Exception(f"處理 XLSX 檔案 {str(input_path_obj)} 時發生錯誤：{str(e)}")
 
     @staticmethod
-    def convert_doc_to_docx(input_path):
+    def _convert_doc_to_docx(input_path_obj: Path) -> Path:
         """
         若為 .doc 檔，透過 LibreOffice（或 unoconv）將其轉換為 .docx。
-        回傳轉檔後的 .docx 路徑。若失敗則拋出例外。
+        回傳轉檔後的 .docx Path。若失敗則拋出例外。
         """
-        base, _ = os.path.splitext(input_path)
-        temp_docx = base + ".temp.docx"
+        input_stem = input_path_obj.stem
+        # Create a temporary .docx file path in the same directory as the input .doc file for the copy
+        # This is not ideal for a library function but matches original behavior.
+        # A better approach might be to use a user's temp dir or app's cache dir.
+        temp_docx_output_path = input_path_obj.with_name(f"{input_stem}.temp_converted.docx")
 
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with tempfile.TemporaryDirectory() as tmpdir_str:
+                tmpdir_path = Path(tmpdir_str)
+                # LibreOffice expects string paths
                 subprocess.run([
                     "soffice", "--headless", "--convert-to", "docx", 
-                    "--outdir", tmpdir, input_path
-                ], check=True)
+                    "--outdir", tmpdir_str, str(input_path_obj)
+                ], check=True, capture_output=True, text=True) # Added capture_output and text for better error info
+                
                 # LibreOffice 轉檔後檔名與原檔相同但副檔名改為 docx
-                doc_name = os.path.basename(base) + ".docx"
-                converted_path = os.path.join(tmpdir, doc_name)
-                if not os.path.exists(converted_path):
-                    raise FileNotFoundError(f"LibreOffice 轉檔失敗，找不到: {converted_path}")
+                converted_filename = f"{input_stem}.docx"
+                converted_path_in_tmp = tmpdir_path / converted_filename
+                
+                if not converted_path_in_tmp.exists():
+                    raise FileNotFoundError(f"LibreOffice 轉檔失敗，找不到: {str(converted_path_in_tmp)}")
 
-                # 複製轉檔結果到 temp_docx
-                with open(converted_path, "rb") as src, open(temp_docx, "wb") as dst:
-                    dst.write(src.read())
+                # Copy the converted file from tmpdir to temp_docx_output_path
+                shutil.copy(converted_path_in_tmp, temp_docx_output_path)
 
-            if not os.path.exists(temp_docx):
-                raise FileNotFoundError(f"找不到轉檔後的檔案: {temp_docx}")
+            if not temp_docx_output_path.exists(): # Check if copy succeeded
+                raise FileNotFoundError(f"找不到轉檔後的檔案: {str(temp_docx_output_path)}")
 
-            return temp_docx
+            return temp_docx_output_path
 
         except subprocess.CalledProcessError as e:
-            raise Exception(f".doc 轉 .docx 失敗: {str(e)}")
+            error_message = f".doc 轉 .docx 失敗 for {str(input_path_obj)}: {str(e)}\n"
+            if e.stdout:
+                error_message += f"Stdout: {e.stdout}\n"
+            if e.stderr:
+                error_message += f"Stderr: {e.stderr}\n"
+            raise Exception(error_message)
+        except Exception as e: # Catch other errors like FileNotFoundError
+            raise Exception(f"Error during .doc to .docx conversion for {str(input_path_obj)}: {str(e)}")
+
 
     @staticmethod
-    def process_file(input_path, output_dir):
+    def process_file(input_path_str: str, output_dir_str: str) -> dict:
         """
         處理檔案的主要方法：
         1. 檢查檔案存在
         2. 判斷副檔名
         3. 呼叫對應方法（doc/docx / xlsx），輸出中文與英文 JSON
+        Returns a dictionary with paths to the generated JSON files (as strings).
         """
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"找不到輸入檔案：{input_path}")
+        input_path_obj = Path(input_path_str).resolve()
+        output_dir_obj = Path(output_dir_str).resolve()
 
-        file_name = os.path.splitext(os.path.basename(input_path))[0]
-        output_chinese_path = os.path.join(output_dir, f"{file_name}_chinese.json")
-        output_english_path = os.path.join(output_dir, f"{file_name}_english.json")
+        if not input_path_obj.exists():
+            raise FileNotFoundError(f"找不到輸入檔案：{str(input_path_obj)}")
 
-        ext = os.path.splitext(input_path)[1].lower()
-        if ext in ['.doc', '.docx']:
-            # 若為 .doc，先轉檔再處理
-            if ext == '.doc':
-                converted_path = FileProcessor.convert_doc_to_docx(input_path)
-                return FileProcessor.split_docx_to_json(converted_path,
-                                                        output_chinese_path,
-                                                        output_english_path)
+        output_dir_obj.mkdir(parents=True, exist_ok=True) # Ensure output directory exists
+
+        file_stem = input_path_obj.stem
+        output_chinese_path_obj = output_dir_obj / f"{file_stem}_chinese.json"
+        output_english_path_obj = output_dir_obj / f"{file_stem}_english.json"
+
+        # Suffix includes the dot, e.g., ".docx"
+        ext = input_path_obj.suffix.lower()
+        
+        processed_input_path = input_path_obj # Path to be processed (might be converted .doc)
+        temporary_docx_to_delete: Path | None = None
+
+        if ext == '.doc':
+            try:
+                processed_input_path = FileProcessor._convert_doc_to_docx(input_path_obj)
+                temporary_docx_to_delete = processed_input_path # Mark for deletion
+                ext = '.docx' # Update ext for further processing
+            except Exception as e:
+                # If .doc to .docx conversion fails, re-raise to be caught by caller.
+                raise Exception(f"Failed to convert .doc to .docx: {str(input_path_obj)} - Error: {e}")
+
+        try:
+            if ext == '.docx':
+                return FileProcessor._split_docx_to_json(processed_input_path,
+                                                         output_chinese_path_obj,
+                                                         output_english_path_obj)
+            elif ext == '.xlsx':
+                return FileProcessor._split_xlsx_to_json(processed_input_path, # processed_input_path is original for xlsx
+                                                         output_chinese_path_obj,
+                                                         output_english_path_obj)
             else:
-                # .docx 直接處理
-                return FileProcessor.split_docx_to_json(input_path,
-                                                        output_chinese_path,
-                                                        output_english_path)
-        elif ext == '.xlsx':
-            return FileProcessor.split_xlsx_to_json(input_path,
-                                                    output_chinese_path,
-                                                    output_english_path)
-        else:
-            raise ValueError("不支援的檔案格式。僅支援 .doc, .docx 和 .xlsx 格式。")
+                raise ValueError(f"不支援的檔案格式 '{ext}'。僅支援 .doc, .docx 和 .xlsx 格式。")
+        finally:
+            if temporary_docx_to_delete and temporary_docx_to_delete.exists():
+                try:
+                    temporary_docx_to_delete.unlink()
+                except Exception as e:
+                    # Log error during temp file deletion, but don't let it hide original error
+                    print(f"Warning: Failed to delete temporary .docx file {str(temporary_docx_to_delete)}: {e}")
 
 
 if __name__ == "__main__":
@@ -290,15 +318,17 @@ if __name__ == "__main__":
     """
     import sys
     if len(sys.argv) < 3:
-        print("Usage: python file_processor.py <input_file_path> <output_dir>")
+        print("Usage: python utils/file_processor.py <input_file_path> <output_dir>")
         sys.exit(1)
 
-    in_path = sys.argv[1]
-    out_dir = sys.argv[2]
+    # Use Path for command line arguments
+    in_path_obj = Path(sys.argv[1])
+    out_dir_obj = Path(sys.argv[2])
 
     try:
-        result = FileProcessor.process_file(in_path, out_dir)
+        # Pass strings to the public API as per its defined contract
+        result = FileProcessor.process_file(str(in_path_obj), str(out_dir_obj))
         print("Process success:", result)
     except Exception as e:
-        print("Error:", e)
+        print("Error:", e, file=sys.stderr) # Print errors to stderr
         sys.exit(1)
