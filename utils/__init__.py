@@ -1,3 +1,8 @@
 # utils/__init__.py
-# 此模組為 utils 子模組的初始化檔案，
-# 可根據需求擴充其他工具方法或類別。
+"""
+Utils 模組：提供各種工具類別
+"""
+
+from .text_splitter import TextSplitter
+
+__all__ = ['TextSplitter']

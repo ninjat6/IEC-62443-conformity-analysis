@@ -4,11 +4,11 @@ import os
 import json
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QScrollArea, QWidget, QGridLayout,
-    QLabel, QPushButton, QMessageBox
+    QLabel, QPushButton, QMessageBox, QFileDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSettings
 from widgets.draggable_label import DraggableLabel
-from utils.file_processor import FileProcessor  # 引入檔案處理工具
+from utils.text_splitter import TextSplitter  # 引入文字分離工具
 
 class FloatingDialog(QDialog):
     """
@@ -16,7 +16,7 @@ class FloatingDialog(QDialog):
     - 當 json_data 為 None 且 multi_level 為 True 時，會進入多階層瀏覽模式，
       先顯示指定 WORD 檔根目錄下的各階層資料夾按鈕。
     - 當有 json_data 時，則直接以 DraggableLabel 顯示 JSON 資料。
-    - 同時支援呼叫 FileProcessor.process_file 處理檔案產生 JSON，
+    - 同時支援呼叫 TextSplitter.process_file 處理檔案產生 JSON，
       並動態更新介面。
     """
     def __init__(self, json_data=None, parent=None, multi_level=False):
@@ -60,11 +60,19 @@ class FloatingDialog(QDialog):
         self.current_folder = None
         self.in_file_list_mode = False
 
-        # 設定 WORD 檔根目錄（此處可依需求調整或參數化）
-        self.word_root = r"C:\Users\user\Desktop\VScode\IEC 62443 2-4 1223\WORD檔"
-        if not os.path.isdir(self.word_root):
-            label = QLabel(f"目錄不存在：{self.word_root}")
-            self.grid_layout.addWidget(label, 0, 0)
+        # 從設定讀取 WORD 檔根目錄，若無則請使用者選擇
+        settings = QSettings("IEC62443", "ConformityAnalysis")
+        self.word_root = settings.value("word_root_path", "")
+
+        if not self.word_root or not os.path.isdir(self.word_root):
+            # 顯示選擇資料夾按鈕
+            select_btn = QPushButton("📁 選擇 WORD 檔案目錄...")
+            select_btn.clicked.connect(self._select_word_root)
+            self.grid_layout.addWidget(select_btn, 0, 0)
+
+            hint_label = QLabel("請選擇包含 WORD 檔案的根目錄")
+            hint_label.setStyleSheet("color: #666;")
+            self.grid_layout.addWidget(hint_label, 1, 0)
             return
 
         subfolders = [entry.name for entry in os.scandir(self.word_root) if entry.is_dir()]
@@ -120,16 +128,39 @@ class FloatingDialog(QDialog):
             btn.clicked.connect(lambda _, fn=fname, sp=stage_path: self.run_file_processor(sp, fn))
             self.grid_layout.addWidget(btn, (i + row_start) // 3, (i + row_start) % 3)
 
+    def _select_word_root(self):
+        """讓使用者選擇 WORD 檔案根目錄"""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "選擇 WORD 檔案目錄",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        if folder:
+            # 儲存設定
+            settings = QSettings("IEC62443", "ConformityAnalysis")
+            settings.setValue("word_root_path", folder)
+            # 重新初始化介面
+            self.init_multi_level_ui()
+
+    def _get_output_dir(self):
+        """取得輸出目錄，若不存在則建立"""
+        # 使用專案內的 resources/output_json 目錄
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_dir = os.path.join(base_dir, "resources", "output_json")
+        os.makedirs(output_dir, exist_ok=True)
+        return output_dir
+
     def run_file_processor(self, folder_path, filename):
         """
-        呼叫 FileProcessor.process_file 處理檔案，
+        呼叫 TextSplitter.process_file 處理檔案，
         產生中英文 JSON，並以英文 JSON 更新介面
         """
         input_path = os.path.join(folder_path, filename)
-        output_dir = r"C:\Users\user\Desktop\VScode\IEC 62443 2-4 beta\resources\output_json"
+        output_dir = self._get_output_dir()
         try:
-            # 呼叫 utils/file_processor.py 中的 process_file 方法
-            result = FileProcessor.process_file(input_path, output_dir)
+            # 呼叫 utils/text_splitter.py 中的 process_file 方法
+            result = TextSplitter.process_file(input_path, output_dir)
             english_json_path = result.get("english_json")
             if not english_json_path or not os.path.exists(english_json_path):
                 QMessageBox.warning(self, "Error", f"找不到英文 JSON：\n{english_json_path}")

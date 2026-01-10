@@ -1,4 +1,8 @@
-# utils/file_processor.py
+# utils/text_splitter.py
+"""
+文字分離工具：處理檔案並分割中英文內容
+用於 FloatingDialog 的檔案處理功能
+"""
 
 from docx import Document
 from openpyxl import load_workbook
@@ -8,7 +12,8 @@ import re
 import subprocess
 import tempfile
 
-class FileProcessor:
+
+class TextSplitter:
     """處理檔案並分割中英文內容的工具類"""
 
     @staticmethod
@@ -125,11 +130,11 @@ class FileProcessor:
             if not line:
                 continue
 
-            c_line = FileProcessor.clean_line_chinese(line)
+            c_line = TextSplitter.clean_line_chinese(line)
             if c_line:
                 chinese_content.append(c_line)
 
-            e_line = FileProcessor.clean_line_english(line)
+            e_line = TextSplitter.clean_line_english(line)
             if e_line:
                 english_content.append(e_line)
 
@@ -159,7 +164,7 @@ class FileProcessor:
             # 收集所有段落文字並以換行符連成大字串
             text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
 
-            chinese_content, english_content = FileProcessor.split_text_advanced(text)
+            chinese_content, english_content = TextSplitter.split_text_advanced(text)
 
             os.makedirs(os.path.dirname(output_chinese_path), exist_ok=True)
             os.makedirs(os.path.dirname(output_english_path), exist_ok=True)
@@ -195,7 +200,7 @@ class FileProcessor:
                     text_lines.append(line_str)
 
             text = "\n".join(text_lines)
-            chinese_content, english_content = FileProcessor.split_text_advanced(text)
+            chinese_content, english_content = TextSplitter.split_text_advanced(text)
 
             os.makedirs(os.path.dirname(output_chinese_path), exist_ok=True)
             os.makedirs(os.path.dirname(output_english_path), exist_ok=True)
@@ -266,17 +271,17 @@ class FileProcessor:
         if ext in ['.doc', '.docx']:
             # 若為 .doc，先轉檔再處理
             if ext == '.doc':
-                converted_path = FileProcessor.convert_doc_to_docx(input_path)
-                return FileProcessor.split_docx_to_json(converted_path,
+                converted_path = TextSplitter.convert_doc_to_docx(input_path)
+                return TextSplitter.split_docx_to_json(converted_path,
                                                         output_chinese_path,
                                                         output_english_path)
             else:
                 # .docx 直接處理
-                return FileProcessor.split_docx_to_json(input_path,
+                return TextSplitter.split_docx_to_json(input_path,
                                                         output_chinese_path,
                                                         output_english_path)
         elif ext == '.xlsx':
-            return FileProcessor.split_xlsx_to_json(input_path,
+            return TextSplitter.split_xlsx_to_json(input_path,
                                                     output_chinese_path,
                                                     output_english_path)
         else:
@@ -297,7 +302,7 @@ if __name__ == "__main__":
     out_dir = sys.argv[2]
 
     try:
-        result = FileProcessor.process_file(in_path, out_dir)
+        result = TextSplitter.process_file(in_path, out_dir)
         print("Process success:", result)
     except Exception as e:
         print("Error:", e)

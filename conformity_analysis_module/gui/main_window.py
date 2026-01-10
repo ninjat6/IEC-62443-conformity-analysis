@@ -2,20 +2,23 @@
 import re
 from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
-    QListWidget, QLabel, QTextEdit, QWidget, QListWidgetItem, QComboBox,
+    QListWidget, QLabel, QTextEdit, QTextBrowser, QWidget, QListWidgetItem, QComboBox,
     QGroupBox, QSplitter, QProgressBar, QAbstractItemView, QSizePolicy,
     QFrame, QScrollArea, QCheckBox, QMessageBox, QLineEdit,
     QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QSlider, QRadioButton, QButtonGroup, QGridLayout, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve, QSize
-from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPixmap, QPainter, QBrush, QScreen
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve, QSize, QUrl
+from PyQt6.QtGui import QFont, QPalette, QColor, QIcon, QPixmap, QPainter, QBrush, QScreen, QShortcut, QKeySequence
 from PyQt6.QtWidgets import QStyle
 
 from conformity_analysis_module.core.analyzer import Analyzer
 from conformity_analysis_module.core.worksheet_updater import WorksheetUpdater
 from conformity_analysis_module.core.requirements_loader import RequirementsLoader
 from conformity_analysis_module.utils.logger import logger
+from conformity_analysis_module.gui.theme_manager import ThemeManager, get_theme_manager
+from conformity_analysis_module.gui.result_filter_panel import ResultFilterPanel
+from conformity_analysis_module.gui.compliance_dashboard import ComplianceDashboard
 
 # 顏色主題定義
 BG_COLOR = "#F8F9FA"
@@ -35,7 +38,7 @@ INFO_COLOR = "#17A2B8"
 
 
 class AnalysisThread(QThread):
-    progress = pyqtSignal(int)
+    progress = pyqtSignal(int, int, str)  # current, total, stage_name
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
@@ -45,14 +48,31 @@ class AnalysisThread(QThread):
         self.folder_path = folder_path
         self.requirements = requirements
         self.threshold = threshold
+        self._cancelled = False
+
+    def cancel(self):
+        """請求取消分析"""
+        self._cancelled = True
+
+    def is_cancelled(self):
+        """檢查是否已請求取消"""
+        return self._cancelled
 
     def run(self):
         try:
-            results = self.analyzer.analyze(self.folder_path, self.requirements, self.threshold)
-            self.finished.emit(results)
+            results = self.analyzer.analyze(
+                self.folder_path,
+                self.requirements,
+                self.threshold,
+                progress_callback=lambda current, total, stage: self.progress.emit(current, total, stage),
+                cancelled_check=self.is_cancelled
+            )
+            if not self._cancelled:
+                self.finished.emit(results)
         except Exception as e:
-            logger.error(f"Analysis thread error: {e}", exc_info=True)
-            self.error.emit(str(e))
+            if not self._cancelled:
+                logger.error(f"Analysis thread error: {e}", exc_info=True)
+                self.error.emit(str(e))
 
 
 class StyledButton(QPushButton):
@@ -437,7 +457,10 @@ class ConformityAnalysisWindow(QMainWindow):
             
             # 創建狀態欄
             self.create_status_bar()
-            
+
+            # 設定鍵盤快捷鍵
+            self.setup_shortcuts()
+
             # 初始化響應式佈局（延遲執行）
             QTimer.singleShot(100, self.update_responsive_layout)
             
@@ -450,22 +473,38 @@ class ConformityAnalysisWindow(QMainWindow):
     def create_header(self, parent_layout):
         """創建標題區域"""
         header_widget = QWidget()
-        header_layout = QVBoxLayout(header_widget)
+        header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 15)
         header_layout.setSpacing(8)
-        
+
+        # 左側標題區
+        title_container = QWidget()
+        title_layout = QVBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(4)
+
         # 主標題
         title_label = QLabel("IEC 62443-2-4 符合性分析工具")
         title_label.setFont(QFont("System UI", 20, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {TEXT_COLOR}; margin-bottom: 5px;")
-        header_layout.addWidget(title_label)
-        
+        title_layout.addWidget(title_label)
+
         # 副標題
         subtitle_label = QLabel("自動化分析文件與 IEC 62443-2-4 標準的符合性 • 支援響應式佈局")
         subtitle_label.setFont(QFont("System UI", 11))
         subtitle_label.setStyleSheet(f"color: {SECONDARY_TEXT_COLOR};")
-        header_layout.addWidget(subtitle_label)
-        
+        title_layout.addWidget(subtitle_label)
+
+        header_layout.addWidget(title_container, 1)
+
+        # 右側主題切換按鈕
+        self.theme_btn = QPushButton()
+        self.theme_btn.setFixedSize(40, 40)
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.setToolTip("切換深色/淺色模式 (Ctrl+T)")
+        self.theme_btn.clicked.connect(self.toggle_theme)
+        self._update_theme_button()
+        header_layout.addWidget(self.theme_btn)
+
         parent_layout.addWidget(header_widget)
 
     def create_left_panel(self):
@@ -540,21 +579,30 @@ class ConformityAnalysisWindow(QMainWindow):
         group = QGroupBox("步驟 2：選擇分析模型")
         layout = QVBoxLayout()
         layout.setSpacing(10)
-        
+
         # 模型選擇下拉框
         self.model_combo = QComboBox()
         self.model_combo.addItem("🔤 all-MiniLM-L12-v2 (預設英文模型)", "models/all-MiniLM-L12-v2")
         self.model_combo.addItem("🌐 paraphrase-multilingual-MiniLM-L12-v2 (增強中文支援)", "models/paraphrase-multilingual-MiniLM-L12-v2")
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         layout.addWidget(self.model_combo)
-        
+
+        # 混合檢索選項
+        self.hybrid_checkbox = QCheckBox("🔀 啟用混合檢索 (BM25 + SBERT)")
+        self.hybrid_checkbox.setToolTip(
+            "結合關鍵詞匹配 (BM25) 與語意理解 (SBERT) 的混合檢索模式\n"
+            "可提升對專業術語和關鍵詞的匹配能力"
+        )
+        self.hybrid_checkbox.setChecked(False)
+        layout.addWidget(self.hybrid_checkbox)
+
         # 模型說明
         self.model_info = QLabel("適用於英文文件的快速分析")
         self.model_info.setFont(QFont("System UI", 9))
         self.model_info.setStyleSheet(f"color: {SECONDARY_TEXT_COLOR}; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
         self.model_info.setWordWrap(True)
         layout.addWidget(self.model_info)
-        
+
         group.setLayout(layout)
         return group
 
@@ -832,21 +880,37 @@ class ConformityAnalysisWindow(QMainWindow):
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 15, 0, 0)
         layout.setSpacing(15)
-        
+
         # 主要行動按鈕
         self.analyze_btn = StyledButton("🚀 開始分析", primary=True)
         self.analyze_btn.clicked.connect(self.analyze)
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setMinimumHeight(45)
         layout.addWidget(self.analyze_btn)
-        
+
+        # 取消按鈕
+        self.cancel_btn = StyledButton("⏹️ 取消")
+        self.cancel_btn.clicked.connect(self.cancel_analysis)
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.setMinimumHeight(45)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ERROR_COLOR}; color: white;
+                border: none; border-radius: 6px; padding: 8px 18px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{ background-color: #C82333; }}
+            QPushButton:pressed {{ background-color: #A71D2A; }}
+        """)
+        layout.addWidget(self.cancel_btn)
+
         # 次要行動按鈕
         self.fill_worksheet_btn = StyledButton("📝 填入 Worksheet")
         self.fill_worksheet_btn.clicked.connect(self.fill_worksheet)
         self.fill_worksheet_btn.setEnabled(False)
         self.fill_worksheet_btn.setMinimumHeight(45)
         layout.addWidget(self.fill_worksheet_btn)
-        
+
         return container
 
     def create_right_panel(self):
@@ -892,16 +956,34 @@ class ConformityAnalysisWindow(QMainWindow):
             }}
         """)
         result_layout.addWidget(self.result_message_widget)
-        
-        # 結果詳情
-        self.result_detail = QTextEdit()
-        self.result_detail.setReadOnly(True)
+
+        # 過濾面板
+        self.filter_panel = ResultFilterPanel()
+        self.filter_panel.setVisible(False)
+        self.filter_panel.filter_changed.connect(self.on_filter_changed)
+        result_layout.addWidget(self.filter_panel)
+
+        # 過濾摘要
+        self.filter_summary_label = QLabel()
+        self.filter_summary_label.setStyleSheet(f"color: {SECONDARY_TEXT_COLOR}; font-size: 9pt; padding: 4px;")
+        self.filter_summary_label.setVisible(False)
+        result_layout.addWidget(self.filter_summary_label)
+
+        # 結果詳情（使用 QTextBrowser 支援連結點擊）
+        self.result_detail = QTextBrowser()
+        self.result_detail.setOpenExternalLinks(False)  # 禁用外部連結，由我們處理
+        self.result_detail.anchorClicked.connect(self.on_result_link_clicked)
         self.result_detail.setPlaceholderText("🔍 分析結果將顯示在這裡...\n\n請先選擇資料夾和條款，然後點擊「開始分析」按鈕。")
         result_layout.addWidget(self.result_detail, 1)
         
         result_group.setLayout(result_layout)
-        layout.addWidget(result_group)
-        
+        layout.addWidget(result_group, 1)
+
+        # 統計儀表板
+        self.dashboard = ComplianceDashboard()
+        self.dashboard.setVisible(False)
+        layout.addWidget(self.dashboard)
+
         self.right_panel = panel
         return panel
 
@@ -910,14 +992,46 @@ class ConformityAnalysisWindow(QMainWindow):
         self.status_bar = self.statusBar()
         self.status_bar.setStyleSheet(f"""
             QStatusBar {{
-                background-color: {CONTENT_BG_COLOR}; 
+                background-color: {CONTENT_BG_COLOR};
                 color: {SECONDARY_TEXT_COLOR};
-                font-size: 10pt; 
+                font-size: 10pt;
                 border-top: 1px solid {BORDER_COLOR};
                 padding: 8px 15px;
             }}
         """)
         self.status_bar.showMessage("🎯 就緒 - 請選擇資料夾開始分析")
+
+    def setup_shortcuts(self):
+        """設定鍵盤快捷鍵"""
+        shortcuts = [
+            ('Ctrl+O', '開啟資料夾', self.select_folder),
+            ('F5', '開始分析', self.analyze),
+            ('Escape', '取消分析', self.cancel_analysis),
+            ('Ctrl+A', '全選條款', self.select_all_requirements),
+            ('Ctrl+Shift+A', '取消全選', self.select_none_requirements),
+            ('Ctrl+T', '切換主題', self.toggle_theme),
+            ('F1', '顯示說明', self.show_help),
+        ]
+
+        for key, desc, callback in shortcuts:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.activated.connect(callback)
+
+    def show_help(self):
+        """顯示快捷鍵說明"""
+        help_text = """
+<h3>鍵盤快捷鍵</h3>
+<table style="border-collapse: collapse; width: 100%;">
+<tr><td style="padding: 5px;"><b>Ctrl+O</b></td><td>開啟資料夾</td></tr>
+<tr><td style="padding: 5px;"><b>F5</b></td><td>開始分析</td></tr>
+<tr><td style="padding: 5px;"><b>Escape</b></td><td>取消分析</td></tr>
+<tr><td style="padding: 5px;"><b>Ctrl+A</b></td><td>全選條款</td></tr>
+<tr><td style="padding: 5px;"><b>Ctrl+Shift+A</b></td><td>取消全選</td></tr>
+<tr><td style="padding: 5px;"><b>Ctrl+T</b></td><td>切換主題</td></tr>
+<tr><td style="padding: 5px;"><b>F1</b></td><td>顯示此說明</td></tr>
+</table>
+        """
+        QMessageBox.information(self, "快捷鍵說明", help_text)
 
     def update_responsive_layout(self):
         """更新響應式佈局"""
@@ -1257,40 +1371,89 @@ class ConformityAnalysisWindow(QMainWindow):
 
         # 開始分析
         selected_model = self.model_combo.currentData()
+        use_hybrid = self.hybrid_checkbox.isChecked()
         threshold_info = f"相似度閾值: {int(self.threshold_value * 100)}%"
-        logger.info(f"Starting analysis with model: {selected_model}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
-        
-        self.analyzer = Analyzer(model_name=selected_model)
-        self.analyze_btn.setEnabled(False)
+        mode_info = "混合檢索" if use_hybrid else "語意檢索"
+        logger.info(f"Starting analysis with model: {selected_model}, mode: {mode_info}, {len(selected_requirements_data)} requirements, threshold: {self.threshold_value}")
+
+        self.analyzer = Analyzer(model_name=selected_model, use_hybrid=use_hybrid)
+        self.analyze_btn.setVisible(False)
+        self.cancel_btn.setVisible(True)
         self.fill_worksheet_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 不確定進度
-        self.progress_bar.setFormat("🔄 正在分析中...")
+        self.progress_bar.setRange(0, 100)  # 確定性進度
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("🔄 準備分析...")
         self.result_message_widget.setVisible(False)
         self.result_detail.clear()
         self.status_bar.showMessage(f"🔄 正在分析中，請稍候... ({threshold_info})")
-        
+
         # 啟動分析執行緒
         self.analysis_thread = AnalysisThread(
-            self.analyzer, 
-            self.folder_path, 
+            self.analyzer,
+            self.folder_path,
             selected_requirements_data,
             self.threshold_value
         )
+        self.analysis_thread.progress.connect(self.on_analysis_progress)
         self.analysis_thread.finished.connect(self.on_analysis_finished)
         self.analysis_thread.error.connect(self.on_analysis_error)
         self.analysis_thread.start()
+
+    def cancel_analysis(self):
+        """取消分析"""
+        if self.analysis_thread and self.analysis_thread.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "確認取消",
+                "確定要取消分析嗎？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.analysis_thread.cancel()
+                self.status_bar.showMessage("⏹️ 正在取消分析...")
+                self.progress_bar.setFormat("⏹️ 取消中...")
+
+                # 等待執行緒完成
+                self.analysis_thread.wait(2000)
+
+                # 重置 UI 狀態
+                self.progress_bar.setVisible(False)
+                self.cancel_btn.setVisible(False)
+                self.update_analyze_button_state()
+                self.status_bar.showMessage("⏹️ 分析已取消", 5000)
+
+    def on_analysis_progress(self, current, total, stage_name):
+        """處理分析進度更新"""
+        self.progress_bar.setValue(current)
+        self.progress_bar.setFormat(f"{stage_name} ({current}%)")
+        self.status_bar.showMessage(f"🔄 {stage_name}")
+
+    def on_filter_changed(self):
+        """過濾條件變更時重新顯示結果"""
+        if self.analysis_results:
+            self.display_analysis_results(self.analysis_results)
 
     def on_analysis_finished(self, results):
         """分析完成處理"""
         self.analysis_results = results
         logger.info(f"Analysis finished with {len(results)} results.")
-        
+
         # 更新UI狀態
         self.progress_bar.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self.analyze_btn.setVisible(True)
         self.update_analyze_button_state()
         self.fill_worksheet_btn.setEnabled(len(results) > 0)
         self.result_message_widget.setVisible(True)
+
+        # 顯示過濾面板（如有結果）
+        has_results = len(results) > 0
+        self.filter_panel.setVisible(has_results)
+        self.filter_summary_label.setVisible(has_results)
+        if has_results:
+            self.filter_panel.reset_filters()
         
         threshold_info = f"（相似度閾值: {int(self.threshold_value * 100)}%）"
         
@@ -1326,19 +1489,55 @@ class ConformityAnalysisWindow(QMainWindow):
 
         # 顯示詳細結果
         self.display_analysis_results(results)
-        
+
+        # 更新統計儀表板
+        self.dashboard.setVisible(True)
+        selected_count = self.get_selected_requirement_count()
+        selected_reqs = self._get_selected_requirements_dict()
+        self.dashboard.update_stats(results, selected_count, selected_reqs)
+
         # 更新狀態欄
         if results:
             self.status_bar.showMessage(f"✅ 分析完成 - 找到 {len(results)} 筆結果", 8000)
         else:
             self.status_bar.showMessage(f"ℹ️ 分析完成 - 未找到符合結果，建議調整條件", 8000)
 
+    def _get_selected_requirements_dict(self) -> dict:
+        """取得選中的條款字典"""
+        selected = {}
+        if hasattr(self, 'requirements_tree') and self.requirements_tree:
+            iterator = QTreeWidgetItemIterator(self.requirements_tree)
+            while iterator.value():
+                item = iterator.value()
+                if item.parent() and item.checkState(0) == Qt.CheckState.Checked:
+                    req_key = item.data(0, Qt.ItemDataRole.UserRole)
+                    if req_key and req_key in self.requirements:
+                        selected[req_key] = self.requirements[req_key]
+                iterator += 1
+        return selected
+
     def display_analysis_results(self, results):
         """顯示分析結果詳情"""
         if results:
-            # 生成結果HTML
-            html_content = self.generate_results_html(results)
-            self.result_detail.setHtml(html_content)
+            # 套用過濾條件
+            filtered_results = self.filter_panel.apply_filters(results)
+
+            # 更新過濾摘要
+            summary = self.filter_panel.get_filter_summary(len(results), len(filtered_results))
+            self.filter_summary_label.setText(summary)
+
+            if filtered_results:
+                # 生成結果HTML
+                html_content = self.generate_results_html(filtered_results)
+                self.result_detail.setHtml(html_content)
+            else:
+                # 過濾後無結果
+                self.result_detail.setHtml(f"""
+                <div style="padding: 40px; text-align: center; color: {SECONDARY_TEXT_COLOR};">
+                    <h3>🔍 沒有符合過濾條件的結果</h3>
+                    <p>請調整過濾條件或點擊「重置」按鈕</p>
+                </div>
+                """)
         else:
             # 顯示建議
             self.result_detail.setHtml(f"""
@@ -1403,28 +1602,32 @@ class ConformityAnalysisWindow(QMainWindow):
                 
                 snippet = item.get('snippet', 'N/A')
                 source_file = item.get('source_file', 'N/A')
-                
+
                 # 文件名處理
                 if source_file != 'N/A':
                     file_name = source_file.split('/')[-1] if '/' in source_file else source_file.split('\\')[-1]
+                    # 建立可點擊連結
+                    file_link = f'<a href="openfile:{source_file}" style="color: {ACCENT_COLOR}; text-decoration: none;">{file_name}</a>'
                 else:
                     file_name = 'N/A'
-                
+                    file_link = file_name
+
                 html += f"""
-                <div style="background-color: #F8F9FA; border-left: 4px solid {similarity_color}; 
+                <div style="background-color: #F8F9FA; border-left: 4px solid {similarity_color};
                             padding: 12px; margin: 8px 0; border-radius: 0 4px 4px 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="font-weight: 600; color: {TEXT_COLOR};">#{i+1}</span>
-                        <span style="background-color: {similarity_color}; color: white; 
+                        <span style="background-color: {similarity_color}; color: white;
                                      padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: 600;">
                             {similarity_str}
                         </span>
                     </div>
                     <p style="margin: 5px 0; color: {SECONDARY_TEXT_COLOR}; font-size: 0.9em;">
-                        📁 <b>來源:</b> {file_name}
+                        📁 <b>來源:</b> {file_link}
+                        <span style="font-size: 0.85em; color: #999;"> (點擊開啟)</span>
                     </p>
-                    <p style="margin: 8px 0 0 0; color: {TEXT_COLOR}; 
-                              background-color: white; padding: 10px; border-radius: 4px; 
+                    <p style="margin: 8px 0 0 0; color: {TEXT_COLOR};
+                              background-color: white; padding: 10px; border-radius: 4px;
                               border: 1px solid {BORDER_COLOR};">
                         <b>內容:</b> {snippet[:200]}{'...' if len(snippet) > 200 else ''}
                     </p>
@@ -1448,9 +1651,11 @@ class ConformityAnalysisWindow(QMainWindow):
     def on_analysis_error(self, error_msg):
         """分析錯誤處理"""
         logger.error(f"Analysis error: {error_msg}")
-        
+
         # 更新UI狀態
         self.progress_bar.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self.analyze_btn.setVisible(True)
         self.update_analyze_button_state()
         self.fill_worksheet_btn.setEnabled(False)
         self.result_message_widget.setVisible(True)
@@ -1517,6 +1722,87 @@ class ConformityAnalysisWindow(QMainWindow):
         finally:
             self.fill_worksheet_btn.setEnabled(True)
 
+    def toggle_theme(self):
+        """切換深色/淺色主題"""
+        theme_manager = get_theme_manager()
+        new_theme = theme_manager.toggle_theme()
+        self._update_theme_button()
+        theme_name = "深色模式" if new_theme == 'dark' else "淺色模式"
+        self.status_bar.showMessage(f"🎨 已切換至{theme_name}", 3000)
+
+    def _update_theme_button(self):
+        """更新主題切換按鈕外觀"""
+        theme_manager = get_theme_manager()
+        is_dark = theme_manager.is_dark()
+        theme = theme_manager.get_theme()
+
+        icon = "☀️" if is_dark else "🌙"
+        self.theme_btn.setText(icon)
+        self.theme_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme['content_bg']};
+                border: 1px solid {theme['border']};
+                border-radius: 20px;
+                font-size: 18px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['hover_bg']};
+                border-color: {theme['accent']};
+            }}
+        """)
+
+    def on_result_link_clicked(self, url: QUrl):
+        """處理結果中的連結點擊"""
+        url_str = url.toString()
+
+        # 處理檔案連結
+        if url_str.startswith('file:///'):
+            file_path = url_str[8:]  # 移除 'file:///'
+            # Windows 路徑處理
+            if len(file_path) > 2 and file_path[1] == ':':
+                pass  # 已是正確的 Windows 路徑
+            else:
+                file_path = '/' + file_path  # Unix 路徑
+            self.open_source_file(file_path)
+        elif url_str.startswith('openfile:'):
+            file_path = url_str[9:]  # 移除 'openfile:'
+            self.open_source_file(file_path)
+
+    def open_source_file(self, file_path: str):
+        """開啟源檔案"""
+        import os
+        import subprocess
+        import platform
+
+        # 清理路徑
+        file_path = file_path.replace('/', '\\') if platform.system() == 'Windows' else file_path
+
+        if not os.path.exists(file_path):
+            QMessageBox.warning(
+                self,
+                "找不到檔案",
+                f"無法開啟檔案：\n{file_path}\n\n檔案可能已被移動或刪除。"
+            )
+            return
+
+        try:
+            system = platform.system()
+            if system == 'Windows':
+                os.startfile(file_path)
+            elif system == 'Darwin':  # macOS
+                subprocess.run(['open', file_path], check=True)
+            else:  # Linux
+                subprocess.run(['xdg-open', file_path], check=True)
+
+            self.status_bar.showMessage(f"📂 已開啟: {os.path.basename(file_path)}", 3000)
+        except Exception as e:
+            logger.error(f"無法開啟檔案 {file_path}: {e}")
+            QMessageBox.warning(
+                self,
+                "開啟失敗",
+                f"無法開啟檔案：\n{file_path}\n\n錯誤: {str(e)}"
+            )
+
     def resizeEvent(self, event):
         """視窗大小改變事件"""
         super().resizeEvent(event)
@@ -1552,16 +1838,20 @@ class ConformityAnalysisWindow(QMainWindow):
 
 if __name__ == '__main__':
     import sys
-    
+
     app = QApplication(sys.argv)
-    
+
     # 設置應用程式屬性
     app.setApplicationName("IEC 62443-2-4 符合性分析工具")
     app.setApplicationVersion("2.0")
     app.setOrganizationName("Security Analysis Tools")
-    
+
+    # 初始化並套用主題
+    theme_manager = get_theme_manager()
+    theme_manager.apply_theme()
+
     # 創建並顯示主視窗
     window = ConformityAnalysisWindow()
     window.show()
-    
+
     sys.exit(app.exec())
